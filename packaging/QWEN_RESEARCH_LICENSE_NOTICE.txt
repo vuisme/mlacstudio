@@ -1,0 +1,9 @@
+Qwen-Image-2.1 model weights are not part of Qwen Image Studio.
+
+Before downloading weights, review the Qwen Research License Agreement at the
+official model source selected for the release. The current license finding in
+packaging/DESIGN.md permits non-commercial use only unless a separate commercial
+license is obtained.
+
+The model manager requires the explicit --accept-license flag and records that
+acceptance locally. This notice is not legal advice.

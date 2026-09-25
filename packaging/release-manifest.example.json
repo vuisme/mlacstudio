@@ -1,0 +1,226 @@
+{
+  "schema_version": 2,
+  "release_version": "0.3.0",
+  "licenses": {
+    "project-mit": {
+      "name": "MLAC Studio MIT License",
+      "version": "MIT-2026",
+      "model": "MLAC Studio",
+      "text": "The application code is provided under the bundled MIT License.",
+      "acceptance_required": false,
+      "notice": "See LICENSE in the application directory."
+    },
+    "stable-diffusion-cpp-mit": {
+      "name": "stable-diffusion.cpp MIT License",
+      "version": "bundled-runtime-revision",
+      "model": "stable-diffusion.cpp runtime",
+      "text": "The bundled native runtime is provided under its included MIT license and notices.",
+      "acceptance_required": false,
+      "notice": "See THIRD_PARTY_NOTICES.md in the application directory."
+    },
+    "qwen-research": {
+      "name": "Qwen Research License Agreement",
+      "version": "qwen-image-2.1",
+      "model": "Qwen-Image-2.1",
+      "text": "Use of these model weights is subject to the Qwen Research License Agreement and its non-commercial-use restriction unless you hold separate permission.",
+      "acceptance_required": true,
+      "notice": "Qwen-Image-2.1 weights are restricted to non-commercial use unless you have a separate commercial license. Review the upstream license before accepting."
+    },
+    "qwen3-vl-apache-2.0": {
+      "name": "Apache License 2.0",
+      "version": "qwen3-vl-8b-instruct-gguf-f982a075",
+      "model": "Qwen3-VL-8B-Instruct-GGUF",
+      "text": "The official Qwen3-VL-8B-Instruct GGUF text encoder and vision projector are provided under Apache License 2.0.",
+      "acceptance_required": false,
+      "notice": "Source: Qwen/Qwen3-VL-8B-Instruct-GGUF at immutable revision f982a07559d4a2f6c8744d840bf6fccab30eea96."
+    }
+  },
+  "artifacts": [
+    {
+      "id": "runtime-sd-cli",
+      "delivery": "bundled",
+      "root": "runtime",
+      "path": "sd-cli.exe",
+      "role": "sd_cli",
+      "source_config_key": "sd_cli",
+      "url": "",
+      "size": 0,
+      "sha256": "",
+      "license": "stable-diffusion-cpp-mit"
+    },
+    {
+      "id": "runtime-sd-server",
+      "delivery": "bundled",
+      "root": "runtime",
+      "path": "sd-server.exe",
+      "role": "sd_server",
+      "source_config_key": "sd_server",
+      "url": "",
+      "size": 0,
+      "sha256": "",
+      "license": "stable-diffusion-cpp-mit"
+    },
+    {
+      "id": "transformer-q4-0",
+      "delivery": "download",
+      "root": "models",
+      "path": "transformer/qwen-image-2.1-UC-Q4_0.gguf",
+      "role": "transformer",
+      "url": "",
+      "size": 4151573280,
+      "sha256": "13f59f20656efc0aa385d03c1fcac1a9dc2ad6e5ccc0ea9bfe1d6ac636f2c5b9",
+      "license": "qwen-research"
+    },
+    {
+      "id": "transformer-q4-k-m",
+      "delivery": "download",
+      "root": "models",
+      "path": "transformer/qwen-image-2.1-UC-Q4_K_M.gguf",
+      "role": "transformer",
+      "source_config_key": "transformer",
+      "url": "",
+      "size": 4604558112,
+      "sha256": "e79c8a009f2ecbdb6c70fd663d9aea9ee304a0d91f347e4169a756b8ad141b41",
+      "license": "qwen-research"
+    },
+    {
+      "id": "transformer-q5-k-m",
+      "delivery": "download",
+      "root": "models",
+      "path": "transformer/qwen-image-2.1-UC-Q5_K_M.gguf",
+      "role": "transformer",
+      "url": "",
+      "size": 5221284640,
+      "sha256": "af0bf278cf16d204fb31c384dc82fd41dca82d976b15fe9305a60c726fd6f821",
+      "license": "qwen-research"
+    },
+    {
+      "id": "text-encoder-q4-k-m",
+      "delivery": "download",
+      "root": "models",
+      "path": "text-encoder/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "role": "text_encoder",
+      "source_config_key": "text_encoder",
+      "url": "",
+      "size": 0,
+      "sha256": "",
+      "license": "qwen3-vl-apache-2.0"
+    },
+    {
+      "id": "vision-projector-f16",
+      "delivery": "download",
+      "root": "models",
+      "path": "text-encoder/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+      "role": "mmproj",
+      "source_config_key": "mmproj",
+      "url": "",
+      "size": 0,
+      "sha256": "",
+      "license": "qwen3-vl-apache-2.0"
+    },
+    {
+      "id": "qwen-image-vae-bf16",
+      "delivery": "download",
+      "root": "models",
+      "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "role": "vae",
+      "source_config_key": "vae",
+      "url": "",
+      "size": 0,
+      "sha256": "",
+      "license": "qwen-research"
+    }
+  ],
+  "profiles": {
+    "nvidia-8-11gb": {
+      "name": "Balanced 8-11 GB",
+      "model_id": "qwen-image-2.1",
+      "model_version": "2.1-q4_0",
+      "description": "NVIDIA 8-11 GiB, Q4_0 transformer, CPU text encoder and VAE",
+      "min_vram_mib": 8192,
+      "max_vram_mib": 12287,
+      "artifacts": [
+        "runtime-sd-cli",
+        "runtime-sd-server",
+        "transformer-q4-0",
+        "text-encoder-q4-k-m",
+        "vision-projector-f16",
+        "qwen-image-vae-bf16"
+      ],
+      "extra_args": [
+        "--cfg-scale",
+        "6.0",
+        "--sampling-method",
+        "euler",
+        "--diffusion-fa",
+        "--vae-tiling",
+        "--backend",
+        "diffusion=CUDA0,te=CPU,vae=CPU",
+        "--params-backend",
+        "vae=cpu",
+        "--max-vram",
+        "CUDA0=7"
+      ]
+    },
+    "nvidia-12-15gb": {
+      "name": "Quality 12-15 GB",
+      "model_id": "qwen-image-2.1",
+      "model_version": "2.1-q4_k_m",
+      "description": "NVIDIA 12-15 GiB, Q4_K_M transformer",
+      "min_vram_mib": 12288,
+      "max_vram_mib": 16383,
+      "artifacts": [
+        "runtime-sd-cli",
+        "runtime-sd-server",
+        "transformer-q4-k-m",
+        "text-encoder-q4-k-m",
+        "vision-projector-f16",
+        "qwen-image-vae-bf16"
+      ],
+      "extra_args": [
+        "--cfg-scale",
+        "6.0",
+        "--sampling-method",
+        "euler",
+        "--diffusion-fa",
+        "--vae-tiling",
+        "--backend",
+        "diffusion=CUDA0,te=CPU,vae=CUDA0",
+        "--params-backend",
+        "vae=cpu",
+        "--max-vram",
+        "CUDA0=11"
+      ]
+    },
+    "nvidia-16gb-plus": {
+      "name": "High quality 16 GB+",
+      "model_id": "qwen-image-2.1",
+      "model_version": "2.1-q5_k_m",
+      "description": "NVIDIA 16 GiB or more, Q5_K_M transformer",
+      "min_vram_mib": 16384,
+      "max_vram_mib": null,
+      "artifacts": [
+        "runtime-sd-cli",
+        "runtime-sd-server",
+        "transformer-q5-k-m",
+        "text-encoder-q4-k-m",
+        "vision-projector-f16",
+        "qwen-image-vae-bf16"
+      ],
+      "extra_args": [
+        "--cfg-scale",
+        "6.0",
+        "--sampling-method",
+        "euler",
+        "--diffusion-fa",
+        "--vae-tiling",
+        "--backend",
+        "diffusion=CUDA0,te=CPU,vae=CUDA0",
+        "--params-backend",
+        "vae=cpu",
+        "--max-vram",
+        "CUDA0=15"
+      ]
+    }
+  }
+}

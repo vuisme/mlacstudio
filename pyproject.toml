@@ -1,0 +1,21 @@
+[project]
+name = "mlac-studio"
+version = "0.3.0"
+description = "Local Windows MLAC Studio backed by stable-diffusion.cpp"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Janishar Ali", email = "janishar.ali@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pillow>=12.3.0",
+    "pystray==0.19.5",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+pillow = { path = "vendor/pillow-12.3.0-cp312-cp312-win_amd64.whl" }

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLAC Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">MLAC <span>studio</span></div>
+    <div class="row">
+      <select id="sessionSelect" aria-label="Session"></select>
+      <button class="btn" type="button" id="sessionNew">+ New</button>
+      <button class="btn" type="button" id="sessionDup">Duplicate</button>
+      <button class="btn danger-text" type="button" id="sessionDel">Delete</button>
+    </div>
+    <div class="row">
+      <button class="btn model-manage-btn" type="button" id="modelsBtn">Models</button>
+      <button class="btn" type="button" id="logout">Log out</button>
+    </div>
+    <div class="status"><span class="dot" id="lamp"></span><span id="lampText">connecting...</span></div>
+  </header>
+
+  <div class="layout">
+    <section class="setup-banner" id="setupBanner" hidden>
+      <div>
+        <p class="eyebrow">First-run setup</p>
+        <h2>Install a model to start creating</h2>
+        <p>The application and CUDA runtime are ready. Choose a compatible model profile, review its exact license, and download verified weights.</p>
+      </div>
+      <button class="primary" type="button" id="setupModelsBtn">Choose model</button>
+    </section>
+    <aside class="panel" aria-label="Parameters">
+      <section>
+        <div class="label">Runtime</div>
+        <div class="model">
+          <div class="glyph">GG</div>
+          <b>Qwen-Image-2.1 <span class="bad" id="modelBad" hidden>path missing</span></b>
+          <code id="modelPath">-</code>
+          <p class="trust-warning" id="modelTrustWarning" hidden>UNVERIFIED CUSTOM MODEL: one or more active files have no SHA-256 verification.</p>
+          <span class="model-state"><span class="dot off" id="modelDot"></span><span id="modelState">unloaded</span><code id="modelPid"></code></span>
+        </div>
+      </section>
+
+      <section>
+        <div class="label">Mode <span class="right muted">set by reference image</span></div>
+        <div class="mode" id="modeSeg"><span data-m="t2i">Text to image</span><span data-m="i2i">Edit</span></div>
+      </section>
+
+      <section>
+        <label class="label" for="prompt">Prompt <span class="right muted" id="promptCount"></span></label>
+        <div class="mention-wrap">
+          <textarea id="prompt" placeholder="A cinematic neon storefront after rain" aria-describedby="promptHint"></textarea>
+          <div class="mentions" id="mentions" role="listbox" aria-label="Reference images" hidden></div>
+        </div>
+        <p class="hint" id="promptHint">Type @ to name the reference image in the prompt.</p>
+      </section>
+
+      <section>
+        <div class="label">Aspect ratio <span class="right muted" id="ratioSrc"></span></div>
+        <div class="ratios" id="ratios"></div>
+        <div class="readout">
+          <span><b id="dims">-</b> px</span>
+          <span><b id="mp">-</b> MP</span>
+          <span>/32 <b id="grid32">ok</b></span>
+        </div>
+      </section>
+
+      <section>
+        <div class="grid2">
+          <label for="width"><span class="label">Width</span><input type="number" id="width" step="32" min="256" max="4096" placeholder="auto"></label>
+          <label for="height"><span class="label">Height</span><input type="number" id="height" step="32" min="256" max="4096" placeholder="auto"></label>
+        </div>
+        <p class="hint">Overrides the ratio. Values must be multiples of 32.</p>
+      </section>
+
+      <section class="grid2">
+        <label for="steps"><span class="label">Steps</span><input type="number" id="steps" value="20" min="1" max="200"></label>
+        <div>
+          <label class="label" for="seed">Seed</label>
+          <div class="seedrow"><input type="number" id="seed" value="42" min="0"><button class="iconbtn" type="button" id="dice" title="Random seed" aria-label="Random seed">#</button></div>
+        </div>
+      </section>
+
+      <section>
+        <button class="primary" type="button" id="generate">Generate</button>
+        <p class="errors" id="formError" hidden></p>
+        <div class="cmd" id="cmd" aria-label="Equivalent command"></div>
+      </section>
+    </aside>
+
+    <main class="panel center" aria-label="Preview">
+      <section class="stage">
+        <div class="stagehead">
+          <span class="mono" id="stageTitle">No take yet</span>
+          <span class="chip" id="stageRatio" hidden></span>
+          <span class="spacer"></span>
+          <button class="btn sm" type="button" id="useTake" disabled>Use as reference</button>
+          <button class="btn sm" type="button" id="reuseTake" disabled>Reuse settings</button>
+          <a class="btn sm" id="openTake" target="_blank" rel="noopener" hidden>Open</a>
+        </div>
+        <div class="frame" id="frame">
+          <img id="frameImg" alt="" hidden>
+          <span class="empty" id="frameEmpty">Generate to see a take here</span>
+          <span class="badge" id="frameBadge" hidden></span>
+          <div class="live" id="frameLive" hidden></div>
+        </div>
+        <div class="pipeline" id="pipeline"></div>
+        <div class="progress-actions" id="progressActions" hidden>
+          <span class="muted mono" id="progressText"></span>
+          <button class="btn sm danger-text" type="button" id="cancel">Cancel</button>
+        </div>
+      </section>
+
+      <section class="enhanced" id="enhancedBox" hidden></section>
+
+      <section>
+        <div class="label">Local gallery <span class="muted" id="takeCount"></span></div>
+        <div class="takes" id="takes"></div>
+      </section>
+    </main>
+
+    <aside class="panel side" aria-label="Inputs and activity">
+      <div class="side-scroll">
+        <section>
+          <div class="label">Reference image <span class="muted" id="refCount"></span></div>
+          <label class="drop" id="drop" for="fileInput">Drop one PNG, JPEG, or WebP here, or click to choose. A new upload replaces the current reference.</label>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden>
+          <div class="refs" id="refs"></div>
+          <p class="hint">Adding one image switches generation to image-to-image mode.</p>
+          <div class="mask-editor" id="maskEditor" hidden>
+            <div class="label">Brush mask <span class="right muted" id="maskStatus">No selection</span></div>
+            <div class="mask-tools" role="toolbar" aria-label="Mask tools">
+              <button class="btn sm on" type="button" id="maskBrush" aria-pressed="true">Brush</button>
+              <button class="btn sm" type="button" id="maskErase" aria-pressed="false">Erase</button>
+              <button class="btn sm" type="button" id="maskUndo" disabled>Undo</button>
+              <button class="btn sm" type="button" id="maskRedo" disabled>Redo</button>
+              <button class="btn sm" type="button" id="maskClear">Clear</button>
+              <button class="btn sm" type="button" id="maskInvert">Invert</button>
+            </div>
+            <div class="mask-sliders">
+              <label for="maskSize"><span>Size</span><input type="range" id="maskSize" min="4" max="512" value="96"><output id="maskSizeValue">96 px</output></label>
+              <label for="maskFeather"><span>Feather</span><input type="range" id="maskFeather" min="0" max="100" value="20"><output id="maskFeatherValue">20%</output></label>
+            </div>
+            <div class="mask-canvas-wrap" id="maskCanvasWrap">
+              <img id="maskSource" alt="Reference image being masked">
+              <canvas id="maskCanvas" aria-label="Paint the editable area in red"></canvas>
+            </div>
+            <p class="hint">Red pixels may change. Transparent areas are restored exactly from the reference after generation.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="label">Queue</div>
+          <div class="queue" id="queue"></div>
+        </section>
+      </div>
+
+      <section class="side-term">
+        <div class="label">Terminal
+          <span class="tabs" role="tablist" id="termTabs">
+            <button type="button" role="tab" aria-selected="true" data-tab="output">Output</button>
+            <button type="button" role="tab" aria-selected="false" data-tab="render" hidden>Render log</button>
+          </span>
+          <span class="right"><button class="link" type="button" id="termClear">clear</button></span>
+        </div>
+        <pre class="term" id="term"></pre>
+        <div class="term render-log" id="renderLog" hidden></div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<dialog class="models-dialog" id="modelsDialog">
+  <div class="models-head">
+    <div><p class="eyebrow">Local model library</p><h3>Models and hardware profiles</h3></div>
+    <button class="iconbtn" type="button" id="modelsClose" aria-label="Close">x</button>
+  </div>
+  <div class="hardware-strip" id="hardwareSummary"></div>
+  <div class="model-catalog" id="modelCatalog"></div>
+  <details class="source-panel" id="sourcePanel">
+    <summary>Model download source override</summary>
+    <p class="hint">Admin-only. Immutable Hugging Face files are resolved with official size and LFS SHA-256 metadata. Custom sources may use any public HTTPS URL; expected size and SHA-256 are optional.</p>
+    <div class="source-grid">
+      <div class="field"><label class="label" for="hfRepo">Repository id</label><input id="hfRepo" placeholder="namespace/repository" autocomplete="off"></div>
+      <div class="field"><label class="label" for="hfRevision">Immutable revision</label><input id="hfRevision" placeholder="40 hexadecimal characters" autocomplete="off"></div>
+    </div>
+    <div class="source-files" id="hfSourceFiles"></div>
+    <label class="custom-source-ack"><input type="checkbox" id="customSourceAck"> I understand that custom sources are my responsibility and may be unverified or unsafe.</label>
+    <p class="trust-warning" id="sourceTrustWarning" hidden>UNVERIFIED CUSTOM SOURCE: files without SHA-256 will remain prominently labeled after installation and activation.</p>
+    <div class="acts source-actions">
+      <button class="btn" type="button" id="hfSourceResolve">Resolve metadata</button>
+      <button class="primary" type="button" id="hfSourceConfirm" hidden>Confirm source</button>
+      <button class="btn danger-text" type="button" id="hfSourceReset">Use packaged sources</button>
+    </div>
+    <div class="source-preview" id="hfSourcePreview" hidden></div>
+    <div class="token-box">
+      <div class="field"><label class="label" for="hfToken">Optional HF token</label><input type="password" id="hfToken" autocomplete="new-password" placeholder="Stored only in Windows Credential Manager"></div>
+      <div class="acts"><button class="btn" type="button" id="hfTokenSet">Store token</button><button class="btn" type="button" id="hfTokenTest">Test</button><button class="btn danger-text" type="button" id="hfTokenRemove">Remove</button><span class="hint" id="hfTokenStatus"></span></div>
+    </div>
+  </details>
+  <section class="download-panel" id="downloadPanel" hidden>
+    <p class="trust-warning inverse" id="downloadTrustWarning" hidden>UNVERIFIED DOWNLOAD: this custom model is not protected by SHA-256 verification.</p>
+    <div class="download-title"><b id="downloadTitle">Preparing download</b><span id="downloadPercent">0%</span></div>
+    <progress id="downloadProgress" max="100" value="0"></progress>
+    <div class="download-stats"><span id="downloadBytes">0 B / 0 B</span><span id="downloadSpeed">-</span><span id="downloadEta">-</span></div>
+    <div class="download-files" id="downloadFiles"></div>
+    <p class="errors" id="downloadError" hidden></p>
+    <div class="acts">
+      <button class="btn danger-text" type="button" id="downloadCancel">Cancel</button>
+      <button class="primary" type="button" id="downloadRetry" hidden>Retry / resume</button>
+    </div>
+  </section>
+  <div class="field"><label class="label" for="idleTimeout">Idle unload timeout (seconds)</label><input type="number" id="idleTimeout" min="1" max="86400" value="300"></div>
+  <p class="hint">Packaged and official Hugging Face artifacts always require size and SHA-256 verification. Explicitly acknowledged custom public HTTPS sources may omit either value.</p>
+  <p class="errors" id="modelsError" hidden></p>
+  <div class="acts"><button class="btn" type="button" id="modelsDone">Done</button><button class="primary" type="button" id="runtimeSave">Save runtime setting</button></div>
+</dialog>
+
+<dialog id="askDialog">
+  <h3 id="askTitle"></h3>
+  <p class="hint" id="askMessage"></p>
+  <input type="text" id="askInput" autocomplete="off">
+  <p class="errors" id="askError" hidden></p>
+  <div class="acts"><button class="btn" type="button" id="askCancel">Cancel</button><button class="primary" type="button" id="askOk">OK</button></div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

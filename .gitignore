@@ -1,0 +1,47 @@
+# Build outputs and packaged artifacts
+build/
+dist/
+*.spec.bak
+*.log
+*-tests.txt
+final-tests.txt
+inno-rebuild.log
+
+# Local runtime state / secrets
+data/
+config.json
+*.db
+*.db-shm
+*.db-wal
+*.part
+packaging/artifact-urls.json
+packaging/local-files.json
+packaging/update-private-key*.json
+packaging/update-signing-seed*.txt
+
+# Models / large ML assets
+*.gguf
+*.safetensors
+*.ckpt
+*.bin
+models/
+runtime/
+
+# Python / JS caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+node_modules/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary tests/research
+.tmp/
+tmp/
+cleanup-manifest.json
+ab-soft-*.png

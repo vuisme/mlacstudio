@@ -1,0 +1,50 @@
+﻿name: Promote or Roll Back Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [promote, rollback]
+        required: true
+      version:
+        description: Release version to promote, without v
+        required: true
+      channel:
+        type: choice
+        options: [stable, beta, dev]
+        default: stable
+      rollback_version:
+        description: Existing safe version for rollback action
+        required: false
+      approval_phrase:
+        description: Type I APPROVE MLAC RELEASE <action>
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mutate-release:
+    runs-on: ubuntu-latest
+    environment: production-release
+    steps:
+      - name: Verify explicit approval
+        shell: bash
+        run: |
+          test '${{ inputs.approval_phrase }}' = 'I APPROVE MLAC RELEASE ${{ inputs.action }}'
+      - name: Promote draft
+        if: inputs.action == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --draft=false)
+          if [ '${{ inputs.channel }}' = stable ]; then args+=(--latest); else args+=(--prerelease); fi
+          gh release edit 'v${{ inputs.version }}' "${args[@]}"
+      - name: Mark rollback release latest
+        if: inputs.action == 'rollback'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -n '${{ inputs.rollback_version }}'
+          gh release edit 'v${{ inputs.rollback_version }}' --repo "$GITHUB_REPOSITORY" --latest

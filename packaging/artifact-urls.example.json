@@ -1,0 +1,8 @@
+{
+  "transformer-q4-0": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q4_0.gguf",
+  "transformer-q4-k-m": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q4_K_M.gguf",
+  "transformer-q5-k-m": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q5_K_M.gguf",
+  "text-encoder-q4-k-m": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "vision-projector-f16": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+  "qwen-image-vae-bf16": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen_image_2.1_vae_bf16.safetensors"
+}

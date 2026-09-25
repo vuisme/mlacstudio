@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up MLAC Studio</title><link rel="stylesheet" href="/static/auth.css"></head>
+<body><main class="card">
+  <p class="eyebrow">First run</p>
+  <h1>Create the local admin</h1>
+  <p class="intro">This account protects the studio, model downloads, API, uploads, and generated images on this Windows PC. Next, the Studio will guide you through a compatible model profile.</p>
+  <form data-mode="setup">
+    <label>Username<input name="username" autocomplete="username" required maxlength="80" autofocus></label>
+    <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="12"></label>
+    <label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required minlength="12"></label>
+    <button type="submit">Create admin</button>
+  </form>
+  <p class="error" id="error" hidden></p>
+  <p class="foot">Credentials stay in the local SQLite database. Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes.</p>
+</main><script src="/static/auth.js"></script></body>
+</html>

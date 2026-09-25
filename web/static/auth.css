@@ -1,0 +1,28 @@
+:root {
+  color-scheme: light;
+  --ink: #1f2925;
+  --muted: #66736c;
+  --paper: #fbf8ef;
+  --line: #d8d1c1;
+  --accent: #087f72;
+  --danger: #b42318;
+}
+* { box-sizing: border-box; }
+body {
+  min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px;
+  color: var(--ink); font: 15px/1.5 "Bahnschrift", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 15% 15%, rgb(8 127 114 / 0.16), transparent 36%),
+    linear-gradient(135deg, #e8e4d8, #f6f1e5 55%, #d9e5df);
+}
+.card { width: min(440px, 100%); padding: 34px; border: 1px solid var(--line); border-radius: 18px; background: rgb(251 248 239 / 0.92); box-shadow: 0 28px 90px rgb(35 48 42 / 0.18); }
+.eyebrow { margin: 0 0 8px; color: var(--accent); font: 700 12px/1 "Cascadia Code", monospace; letter-spacing: .12em; text-transform: uppercase; }
+h1 { margin: 0; font-size: 32px; line-height: 1.05; letter-spacing: -.04em; }
+.intro { color: var(--muted); margin: 12px 0 24px; }
+label { display: block; margin-top: 14px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+input { width: 100%; margin-top: 6px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); font: inherit; }
+input:focus { outline: 2px solid rgb(8 127 114 / .28); border-color: var(--accent); }
+button { width: 100%; margin-top: 22px; padding: 12px; border: 0; border-radius: 9px; background: var(--accent); color: white; font: 700 15px/1 inherit; cursor: pointer; }
+button:disabled { opacity: .55; cursor: wait; }
+.error { margin: 14px 0 0; color: var(--danger); }
+.foot { margin: 18px 0 0; color: var(--muted); font-size: 12px; }

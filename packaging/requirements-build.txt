@@ -1,0 +1,4 @@
+pyinstaller==6.16.0
+keyring==25.6.0
+pillow==12.3.0
+pystray==0.19.5

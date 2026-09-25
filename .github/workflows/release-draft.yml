@@ -1,0 +1,83 @@
+﻿name: Build Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without v prefix
+        required: true
+        default: 0.3.0
+      channel:
+        type: choice
+        options: [stable, beta, dev]
+        default: stable
+      changelog:
+        description: Release summary
+        required: true
+      published_at:
+        description: Deterministic UTC timestamp (ISO-8601)
+        required: true
+      security_mandatory:
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  build-draft:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: release-draft
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packaging/requirements-build.txt
+      - name: Install dependencies
+        shell: pwsh
+        run: python -m pip install -r packaging/requirements-build.txt
+      - name: Test source
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Materialize signing key
+        shell: pwsh
+        env:
+          MLAC_UPDATE_SIGNING_KEY_B64: ${{ secrets.MLAC_UPDATE_SIGNING_KEY_B64 }}
+        run: |
+          if (-not $env:MLAC_UPDATE_SIGNING_KEY_B64) { throw 'Signing secret is missing' }
+          $bytes=[Convert]::FromBase64String($env:MLAC_UPDATE_SIGNING_KEY_B64)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\mlac-signing.xml",$bytes)
+      - name: Build core onedir
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean packaging/mlac-studio.spec
+      - name: Build signed component release
+        shell: pwsh
+        run: |
+          $flags=@{}
+          if ('${{ inputs.security_mandatory }}' -eq 'true') { $flags.SecurityMandatory=$true }
+          ./packaging/build-components.ps1 -CoreDirectory dist/MLACStudio -RuntimeDirectory '${{ vars.MLAC_RUNTIME_DIRECTORY }}' -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -PublishedAt '${{ inputs.published_at }}' -Changelog '${{ inputs.changelog }}' -OutputDirectory dist/mlac-release @flags
+          ./packaging/build-bootstrap.ps1 -Version '${{ inputs.version }}' -OutputDirectory dist/mlac-release
+      - name: Verify signed manifest and payload policy
+        shell: pwsh
+        run: |
+          python packaging/release-tools.py verify --manifest "dist/mlac-release/MLAC-Studio-${{ inputs.channel }}.json" --public-key packaging/keys/mlac-update-public.json
+          if (Get-ChildItem dist/mlac-release -Recurse -File | Where-Object Extension -In '.gguf','.safetensors') { throw 'Model weights must not be released as app components' }
+          Get-FileHash dist/mlac-release/MLAC-Studio-* -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower()) *$([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/mlac-release/SHA256SUMS.txt
+          "${{ inputs.changelog }}" | Set-Content dist/mlac-release/CHANGELOG.md
+      - name: Create GitHub draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" --draft --title "MLAC Studio ${{ inputs.version }}" --notes-file dist/mlac-release/CHANGELOG.md dist/mlac-release/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mlac-studio-${{ inputs.version }}
+          path: dist/mlac-release/*
