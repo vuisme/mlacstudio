@@ -1,0 +1,8 @@
+{
+    "transformer-q4-0":  "https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/resolve/40319fb15542f0ad22921e0124a191a8a935a60a/qwen-image-2.1-UC-Q4_0.gguf",
+    "transformer-q4-k-m":  "https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/resolve/40319fb15542f0ad22921e0124a191a8a935a60a/qwen-image-2.1-UC-Q4_K_M.gguf",
+    "transformer-q5-k-m":  "https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/resolve/40319fb15542f0ad22921e0124a191a8a935a60a/qwen-image-2.1-UC-Q5_K_M.gguf",
+    "text-encoder-q4-k-m":  "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "vision-projector-f16":  "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+    "qwen-image-vae-bf16":  "https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/resolve/40319fb15542f0ad22921e0124a191a8a935a60a/vae/qwen_image_2.1_vae_bf16.safetensors"
+}

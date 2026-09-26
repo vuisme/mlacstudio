@@ -14,7 +14,6 @@ config.json
 *.db-shm
 *.db-wal
 *.part
-packaging/artifact-urls.json
 packaging/local-files.json
 packaging/update-private-key*.json
 packaging/update-signing-seed*.txt

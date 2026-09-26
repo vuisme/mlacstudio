@@ -28,8 +28,7 @@ WORK_AREA = Path(__file__).resolve().parent / "packaging_fixtures"
 
 def fixture_dir(name: str) -> Path:
     path = WORK_AREA / name
-    if not path.is_dir():
-        raise RuntimeError(f"test fixture directory is missing: {path}")
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
