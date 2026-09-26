@@ -123,7 +123,7 @@ class LauncherTests(unittest.TestCase):
     @staticmethod
     def runtime_dir() -> Path:
         path = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        path.mkdir()
+        path.mkdir(parents=True)
         return path
 
     def controller(self, instance_path: Path, **kwargs):

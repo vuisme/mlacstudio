@@ -16,7 +16,7 @@ from storage import Repository, resolve_under, safe_name
 class PathSafetyTests(unittest.TestCase):
     def test_resolve_under_rejects_traversal_and_absolute_paths(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        root.mkdir()
+        root.mkdir(parents=True)
         self.assertEqual(resolve_under(root, "folder/image.png"), (root / "folder/image.png").resolve())
         with self.assertRaises(ValueError):
             resolve_under(root, "../secret.txt")
@@ -28,7 +28,7 @@ class PathSafetyTests(unittest.TestCase):
 
     def test_existing_jobs_table_gets_mask_path_migration(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        root.mkdir()
+        root.mkdir(parents=True)
         database = root / "studio.db"
         with sqlite3.connect(database) as conn:
             conn.execute(

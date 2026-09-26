@@ -65,7 +65,7 @@ class RecordingModelManager:
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        self.root.mkdir()
+        self.root.mkdir(parents=True)
         self.config = self.root / "config.json"
         self.config.write_text(json.dumps({"data_dir": "ignored", **{key: __file__ for key in ("sd_cli", "transformer", "text_encoder", "mmproj", "vae")}}), encoding="utf-8")
         self.app = StudioApp(self.config, data_dir=self.root / "data", adapter=NoopAdapter(), start_worker=False)

@@ -615,7 +615,7 @@ class PersistentManagerTests(unittest.TestCase):
     @staticmethod
     def runtime_dir() -> Path:
         path = WORKSPACE / "tests" / "runtime" / uuid.uuid4().hex
-        path.mkdir()
+        path.mkdir(parents=True)
         return path
 
     @staticmethod
@@ -637,7 +637,7 @@ class PersistentManagerTests(unittest.TestCase):
         manifest_path = root / "release-manifest.json"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         runtime = root / "runtime"
-        runtime.mkdir()
+        runtime.mkdir(parents=True)
         contents = artifact_contents or {}
         for item in manifest["artifacts"]:
             if item["delivery"] == "bundled":
@@ -780,7 +780,7 @@ class PersistentManagerTests(unittest.TestCase):
         payloads = {item["url"]: b"" for item in manifest["artifacts"] if item["delivery"] == "download"}
         root = self.runtime_dir()
         state_dir = root / "state"
-        state_dir.mkdir()
+        state_dir.mkdir(parents=True)
         (state_dir / "model-manager-state.json").write_text(json.dumps({
             **manager.PersistentModelManager._idle_transfer(),
             "profile_id": "medium", "status": "downloading", "stage": "downloading", "activate": True,
@@ -799,7 +799,7 @@ class PersistentManagerTests(unittest.TestCase):
         payloads = {item["url"]: contents[item["id"]] for item in manifest["artifacts"] if item["delivery"] == "download"}
         root = self.runtime_dir()
         state_dir = root / "state"
-        state_dir.mkdir()
+        state_dir.mkdir(parents=True)
         (state_dir / "model-manager-state.json").write_text(json.dumps({
             **manager.PersistentModelManager._idle_transfer(),
             "profile_id": "medium", "status": "downloading", "stage": "downloading", "activate": True,
