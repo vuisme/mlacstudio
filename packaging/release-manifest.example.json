@@ -12,9 +12,9 @@
     },
     "stable-diffusion-cpp-mit": {
       "name": "stable-diffusion.cpp MIT License",
-      "version": "bundled-runtime-revision",
+      "version": "pinned-native-runtime",
       "model": "stable-diffusion.cpp runtime",
-      "text": "The bundled native runtime is provided under its included MIT license and notices.",
+      "text": "The native runtime is downloaded on demand from the source pinned in this release manifest and is provided under its included MIT license and notices.",
       "acceptance_required": false,
       "notice": "See THIRD_PARTY_NOTICES.md in the application directory."
     },
@@ -37,24 +37,18 @@
   },
   "artifacts": [
     {
-      "id": "runtime-sd-cli",
-      "delivery": "bundled",
+      "id": "runtime-stable-diffusion-cpp-cuda12",
+      "delivery": "download",
       "root": "runtime",
-      "path": "sd-cli.exe",
-      "role": "sd_cli",
-      "source_config_key": "sd_cli",
-      "url": "",
-      "size": 0,
-      "sha256": "",
-      "license": "stable-diffusion-cpp-mit"
-    },
-    {
-      "id": "runtime-sd-server",
-      "delivery": "bundled",
-      "root": "runtime",
-      "path": "sd-server.exe",
-      "role": "sd_server",
-      "source_config_key": "sd_server",
+      "path": "downloads/stable-diffusion-cpp-cuda12.zip",
+      "archive": {
+        "format": "zip",
+        "extract_to": "stable-diffusion-cpp-cuda12",
+        "members": {
+          "sd_cli": "sd-cli.exe",
+          "sd_server": "sd-server.exe"
+        }
+      },
       "url": "",
       "size": 0,
       "sha256": "",
@@ -140,8 +134,7 @@
       "min_vram_mib": 8192,
       "max_vram_mib": 12287,
       "artifacts": [
-        "runtime-sd-cli",
-        "runtime-sd-server",
+        "runtime-stable-diffusion-cpp-cuda12",
         "transformer-q4-0",
         "text-encoder-q4-k-m",
         "vision-projector-f16",
@@ -170,8 +163,7 @@
       "min_vram_mib": 12288,
       "max_vram_mib": 16383,
       "artifacts": [
-        "runtime-sd-cli",
-        "runtime-sd-server",
+        "runtime-stable-diffusion-cpp-cuda12",
         "transformer-q4-k-m",
         "text-encoder-q4-k-m",
         "vision-projector-f16",
@@ -200,8 +192,7 @@
       "min_vram_mib": 16384,
       "max_vram_mib": null,
       "artifacts": [
-        "runtime-sd-cli",
-        "runtime-sd-server",
+        "runtime-stable-diffusion-cpp-cuda12",
         "transformer-q5-k-m",
         "text-encoder-q4-k-m",
         "vision-projector-f16",

@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 import time
 import zipfile
@@ -103,7 +102,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
         seen.add(component_id)
         if "model" in component_id.lower():
             raise UpdateError("models are not update components")
-        if component.get("kind") not in {"core", "common-runtime", "nvidia-runtime"}:
+        if component.get("kind") != "core":
             raise UpdateError(f"invalid component kind: {component_id}")
         url = str(component.get("url") or "")
         if not url.startswith("https://github.com/vuisme/mlacstudio/releases/download/"):
@@ -200,37 +199,9 @@ def fetch_metadata(
         raise UpdateError(f"could not check for updates: {exc}") from exc
 
 
-def detect_nvidia(run: Callable[..., Any] = subprocess.run) -> dict[str, Any] | None:
-    try:
-        result = run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        name, memory, driver = [part.strip() for part in result.stdout.splitlines()[0].split(",", 2)]
-        return {"name": name, "vram_mib": int(memory), "driver": driver}
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        return None
-
-
-def select_components(payload: dict[str, Any], gpu: dict[str, Any] | None) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    for component in payload["components"]:
-        kind = component["kind"]
-        if kind in {"core", "common-runtime"}:
-            selected.append(component)
-            continue
-        if kind == "nvidia-runtime" and gpu is not None:
-            minimum = int(component.get("min_driver_major") or 0)
-            try:
-                driver_major = int(str(gpu["driver"]).split(".", 1)[0])
-            except (KeyError, ValueError):
-                driver_major = 0
-            if driver_major >= minimum:
-                selected.append(component)
+def select_components(payload: dict[str, Any], gpu: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    del gpu  # Native runtimes are installed by the model manager, not the app updater.
+    selected = [component for component in payload["components"] if component["kind"] == "core"]
     if not any(item["kind"] == "core" for item in selected):
         raise UpdateError("no compatible core component was selected")
     return selected

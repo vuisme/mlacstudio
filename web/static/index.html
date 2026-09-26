@@ -28,7 +28,7 @@
       <div>
         <p class="eyebrow">First-run setup</p>
         <h2>Install a model to start creating</h2>
-        <p>The application and CUDA runtime are ready. Choose a compatible model profile, review its exact license, and download verified weights.</p>
+        <p>Choose a compatible profile to download the pinned native runtime and model files on demand, then review the exact model license.</p>
       </div>
       <button class="primary" type="button" id="setupModelsBtn">Choose model</button>
     </section>
@@ -181,8 +181,8 @@
   <div class="hardware-strip" id="hardwareSummary"></div>
   <div class="model-catalog" id="modelCatalog"></div>
   <details class="source-panel" id="sourcePanel">
-    <summary>Model download source override</summary>
-    <p class="hint">Admin-only. Immutable Hugging Face files are resolved with official size and LFS SHA-256 metadata. Custom sources may use any public HTTPS URL; expected size and SHA-256 are optional.</p>
+    <summary>Runtime and model source override</summary>
+    <p class="hint">Admin-only. Packaged sources pin HTTPS URLs, sizes, and SHA-256 values. Immutable Hugging Face files can be resolved from official metadata. Custom sources may use any public HTTPS URL; expected size and SHA-256 are optional and missing hashes remain unverified.</p>
     <div class="source-grid">
       <div class="field"><label class="label" for="hfRepo">Repository id</label><input id="hfRepo" placeholder="namespace/repository" autocomplete="off"></div>
       <div class="field"><label class="label" for="hfRevision">Immutable revision</label><input id="hfRevision" placeholder="40 hexadecimal characters" autocomplete="off"></div>

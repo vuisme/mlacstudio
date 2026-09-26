@@ -53,17 +53,36 @@ jobs:
           if (-not $env:MLAC_UPDATE_SIGNING_KEY_B64) { throw 'Signing secret is missing' }
           $bytes=[Convert]::FromBase64String($env:MLAC_UPDATE_SIGNING_KEY_B64)
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\mlac-signing.xml",$bytes)
+      - name: Materialize pinned native runtime source
+        shell: pwsh
+        run: |
+          $runtimeUrl='${{ vars.MLAC_RUNTIME_URL }}'
+          $runtimeSizeText='${{ vars.MLAC_RUNTIME_SIZE }}'
+          $runtimeSha='${{ vars.MLAC_RUNTIME_SHA256 }}'.ToLowerInvariant()
+          if (-not $runtimeUrl.StartsWith('https://')) { throw 'MLAC_RUNTIME_URL must be HTTPS' }
+          $runtimeSize=0L
+          if (-not [long]::TryParse($runtimeSizeText,[ref]$runtimeSize) -or $runtimeSize -le 0) { throw 'MLAC_RUNTIME_SIZE must be a positive integer' }
+          if ($runtimeSha -notmatch '^[0-9a-f]{64}$') { throw 'MLAC_RUNTIME_SHA256 must be 64 hexadecimal characters' }
+          $urls=Get-Content packaging/artifact-urls.json -Raw | ConvertFrom-Json -AsHashtable
+          $urls['runtime-stable-diffusion-cpp-cuda12']=[ordered]@{url=$runtimeUrl;size=$runtimeSize;sha256=$runtimeSha}
+          $urls | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\mlac-artifact-urls.json" -Encoding utf8
       - name: Build application and signed component release
         shell: pwsh
         run: |
           $flags=@{}
           if ('${{ inputs.security_mandatory }}' -eq 'true') { $flags.SecurityMandatory=$true }
-          ./packaging/build.ps1 -RuntimeDirectory '${{ vars.MLAC_RUNTIME_DIRECTORY }}' -UrlMapPath packaging/artifact-urls.json -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -PublishedAt '${{ inputs.published_at }}' -Python python -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -Changelog '${{ inputs.changelog }}' -SkipPortable @flags
+          ./packaging/build.ps1 -UrlMapPath "$env:RUNNER_TEMP\mlac-artifact-urls.json" -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -PublishedAt '${{ inputs.published_at }}' -Python python -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -Changelog '${{ inputs.changelog }}' -SkipPortable @flags
       - name: Verify signed manifest and payload policy
         shell: pwsh
         run: |
           python packaging/release-tools.py verify --manifest "dist/mlac-release/MLAC-Studio-${{ inputs.channel }}.json" --public-key packaging/keys/mlac-update-public.json
           if (Get-ChildItem dist/mlac-release -Recurse -File | Where-Object Extension -In '.gguf','.safetensors') { throw 'Model weights must not be released as app components' }
+          if (Get-ChildItem dist/mlac-release -File | Where-Object Name -Match '(common|nvidia)-runtime') { throw 'Native runtime component assets must not be released' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $core=[IO.Compression.ZipFile]::OpenRead((Resolve-Path "dist/mlac-release/MLAC-Studio-core-${{ inputs.version }}.zip"))
+          try {
+            if ($core.Entries | Where-Object { $_.Name -in 'sd-cli.exe','sd-server.exe' }) { throw 'Core archive must not bundle stable-diffusion.cpp executables' }
+          } finally { $core.Dispose() }
           Get-FileHash dist/mlac-release/MLAC-Studio-* -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower()) *$([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/mlac-release/SHA256SUMS.txt
           "${{ inputs.changelog }}" | Set-Content dist/mlac-release/CHANGELOG.md
       - name: Create GitHub draft release

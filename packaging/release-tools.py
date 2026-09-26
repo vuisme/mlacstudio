@@ -84,7 +84,6 @@ def command_manifest(args: argparse.Namespace) -> None:
             "url": f"https://github.com/vuisme/mlacstudio/releases/download/v{args.version}/{archive.name}",
             "size": archive.stat().st_size,
             "sha256": sha256_file(archive),
-            **({"min_driver_major": args.min_driver_major} if kind == "nvidia-runtime" else {}),
         })
     payload = {
         "schema_version": 1,
@@ -118,7 +117,6 @@ def parser() -> argparse.ArgumentParser:
     manifest.add_argument("--changelog", default="")
     manifest.add_argument("--data-migration", default=None)
     manifest.add_argument("--security-mandatory", action="store_true")
-    manifest.add_argument("--min-driver-major", type=int, default=525)
     manifest.add_argument("--component", action="append", required=True, metavar="ID=KIND=ARCHIVE")
     manifest.add_argument("--private-key", type=Path, required=True)
     manifest.add_argument("--public-key", type=Path, required=True)

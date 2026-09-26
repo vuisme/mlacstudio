@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$RuntimeDirectory,
     [Parameter(Mandatory = $true)][string]$UrlMapPath,
     [Parameter(Mandatory = $true)][string]$PrivateKeyPath,
     [Parameter(Mandatory = $true)][string]$PublishedAt,
@@ -21,10 +20,6 @@ Set-Location -LiteralPath $projectRoot
 foreach ($path in @($Python, $PrivateKeyPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required file not found: $path" }
 }
-if (-not (Test-Path -LiteralPath $RuntimeDirectory -PathType Container)) { throw "Runtime directory not found: $RuntimeDirectory" }
-foreach ($required in @("sd-cli.exe", "sd-server.exe")) {
-    if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDirectory $required) -PathType Leaf)) { throw "Runtime directory is missing $required" }
-}
 if (-not $Version) {
     $projectText = Get-Content -LiteralPath (Join-Path $projectRoot "pyproject.toml") -Raw
     $match = [regex]::Match($projectText, '(?m)^version\s*=\s*"([^"]+)"')
@@ -33,13 +28,19 @@ if (-not $Version) {
 }
 
 $releaseRoot = Join-Path $projectRoot "dist\mlac-release"
+if (Test-Path -LiteralPath $releaseRoot) {
+    Remove-Item -LiteralPath $releaseRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 $modelManifest = Join-Path $releaseRoot "release-manifest.json"
 $manifestArgs = @{
-    OutputPath = $modelManifest; ConfigPath = $ConfigPath; RuntimeDirectory = $RuntimeDirectory
+    OutputPath = $modelManifest; ConfigPath = $ConfigPath
     UrlMapPath = $UrlMapPath; ReleaseVersion = $Version
 }
 if ($LocalFilesPath) { $manifestArgs.LocalFilesPath = $LocalFilesPath }
 & (Join-Path $PSScriptRoot "build-release-manifest.ps1") @manifestArgs
+& $Python (Join-Path $PSScriptRoot "validate-release-sources.py") --manifest $modelManifest --hydrate
+if ($LASTEXITCODE -ne 0) { throw "Generated model manifest metadata hydration failed." }
 & $Python (Join-Path $PSScriptRoot "model-manager.py") validate --manifest $modelManifest
 if ($LASTEXITCODE -ne 0) { throw "Generated model manifest failed validation." }
 & $Python (Join-Path $PSScriptRoot "validate-release-sources.py") --manifest $modelManifest
@@ -60,7 +61,7 @@ foreach ($required in @("MLACStudio.exe", "release-manifest.json", "model-manage
 if (Test-Path -LiteralPath (Join-Path $bundle "runtime")) { throw "Core component must not contain native inference runtimes." }
 
 $componentArgs = @{
-    CoreDirectory = $bundle; RuntimeDirectory = $RuntimeDirectory; PrivateKeyPath = $PrivateKeyPath
+    CoreDirectory = $bundle; PrivateKeyPath = $PrivateKeyPath
     Python = $Python; Version = $Version; Channel = $Channel; PublishedAt = $PublishedAt
     Changelog = $Changelog; OutputDirectory = $releaseRoot
 }

@@ -142,6 +142,21 @@ class LauncherTests(unittest.TestCase):
             pystray_module=kwargs.pop("pystray_module", FakePystray),
         )
 
+    def test_runtime_download_directory_is_mutable_state_not_application_bundle(self) -> None:
+        root = self.runtime_dir()
+        legacy_common = root / "components" / "common-runtime" / "old"
+        with (
+            mock.patch.object(launcher, "_state_root", return_value=root),
+            mock.patch.object(
+                launcher,
+                "_active_component_path",
+                side_effect=lambda ident: legacy_common if ident == "common-runtime" else None,
+            ),
+            mock.patch.dict(launcher.os.environ, {"PATH": "base"}, clear=False),
+        ):
+            self.assertEqual(launcher._runtime_dir(), root / "runtime")
+            self.assertIn(str(legacy_common), launcher.os.environ["PATH"])
+
     def test_named_mutex_rejects_second_instance_and_closes_its_handle(self) -> None:
         kernel32 = FakeKernel32(last_error=launcher.ERROR_ALREADY_EXISTS)
         self.assertIsNone(launcher.WindowsMutex.acquire(kernel32=kernel32))
@@ -315,7 +330,6 @@ class LauncherTests(unittest.TestCase):
         with (
             mock.patch.object(sys, "frozen", True, create=True),
             mock.patch.object(launcher.updater, "fetch_metadata", return_value=launcher.updater.UpdateCheck(payload, True, '"e"')),
-            mock.patch.object(launcher.updater, "detect_nvidia", return_value=None),
             mock.patch.object(launcher, "_confirm", return_value=False),
             mock.patch.object(launcher, "_state_root", return_value=self.runtime_dir()),
         ):

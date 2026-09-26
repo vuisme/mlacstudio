@@ -128,6 +128,7 @@ Source-checkout runtime state is stored under `data/` by default. Packaged build
 - `data/gallery/`: completed PNG takes
 - `data/work/`: temporary render outputs
 - `models/`: model artifacts, source-provenance sidecars, and resumable `.part` files (packaged builds)
+- `runtime/`: verified native runtime archives and safely extracted stable-diffusion.cpp/NVIDIA files (packaged builds)
 - `model-manager-state.json`: persistent download stage, byte counts, errors, and resume state (packaged builds)
 - `installed-profiles.json`: installed and active profile registry (packaged builds)
 - `license-acceptance.json`: model-, license-, and version-specific acceptance records (packaged builds)
@@ -202,10 +203,10 @@ The server still binds only to `127.0.0.1`.
 
 The tiny online bootstrap, deterministic component tooling, signed update metadata, and deployment instructions are
 under [`packaging/`](packaging/DEPLOYMENT.md). The 0.3.0 bootstrap is a compiled Windows GUI executable and embeds no
-Python, CUDA, stable-diffusion.cpp binaries, or model weights. It selects the core, common runtime, and compatible
-NVIDIA runtime components, downloads only changed GitHub release assets, verifies SHA-256 plus the signed manifest,
-and atomically advances `active.json` while retaining one rollback version. Models remain managed separately in the
-authenticated web UI and are never automatically updated.
+Python, CUDA, stable-diffusion.cpp binaries, or model weights. It installs only the core application component,
+downloads only changed GitHub release assets, verifies SHA-256 plus the signed manifest, and atomically advances
+`active.json` while retaining one rollback version. The authenticated model manager separately downloads the pinned
+native runtime and selected weights on demand into `%LOCALAPPDATA%\MLACStudio`.
 
 ## License and upstream
 

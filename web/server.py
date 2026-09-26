@@ -110,7 +110,7 @@ class StudioApp:
                 self.model_manager = manager_module.PersistentModelManager(
                     manifest_source,
                     model_dir=model_dir or config_path.parent / "models",
-                    runtime_dir=runtime_dir or REPO_ROOT / "runtime",
+                    runtime_dir=runtime_dir or config_path.parent / "runtime",
                     config_path=config_path,
                     data_dir=data_dir or configured_data,
                     can_mutate=self.runner.is_idle,

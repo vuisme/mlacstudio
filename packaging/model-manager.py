@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import threading
 import time
 import uuid
+import zipfile
 from typing import Any, BinaryIO, Callable, Iterable
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -33,6 +34,7 @@ SCHEMA_VERSION = 2
 CHUNK_SIZE = 1024 * 1024
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_HF_API_BYTES = 16 * 1024 * 1024
+MAX_RUNTIME_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -619,6 +621,36 @@ def validate_remote_artifacts(
     return results
 
 
+def hydrate_remote_artifacts(
+    manifest: dict[str, Any],
+    *,
+    token: str | None = None,
+    opener: Callable[..., Any] = secure_urlopen,
+) -> dict[str, Any]:
+    """Fill missing integrity metadata only from immutable Hugging Face LFS records."""
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("artifacts"), list):
+        raise ManagerError("manifest artifacts must be an array")
+    metadata_cache: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for artifact in manifest["artifacts"]:
+        if not isinstance(artifact, dict) or artifact.get("delivery") != "download":
+            continue
+        if _expected_size(artifact) is not None and SHA256_RE.fullmatch(str(artifact.get("sha256") or "")):
+            continue
+        url = str(artifact.get("url") or "")
+        if _url_host(url) not in HF_SOURCE_HOSTS:
+            raise ManagerError(f"{artifact.get('id', '(blank)')}: non-Hugging Face downloads require pinned size and SHA-256")
+        repo_id, revision, file_path = parse_hf_file_url(url)
+        key = (repo_id, revision)
+        if key not in metadata_cache:
+            metadata_cache[key] = hf_repo_metadata(repo_id, revision, token=token, opener=opener)
+        metadata = metadata_cache[key].get(file_path)
+        if metadata is None:
+            raise ManagerError(f"{artifact.get('id', '(blank)')}: remote file is missing LFS size/SHA-256 metadata")
+        artifact["size"] = int(metadata["size"])
+        artifact["sha256"] = str(metadata["sha256"]).lower()
+    return validate_manifest(manifest)
+
+
 def _relative_artifact_path(value: Any) -> Path:
     text = str(value or "")
     normalized = text.replace("\\", "/")
@@ -635,6 +667,39 @@ def _relative_artifact_path(value: Any) -> Path:
     if not text or posix.is_absolute() or windows.drive or windows.root or invalid_part:
         raise ManagerError(f"artifact path must be a safe relative path: {text or '(blank)'}")
     return Path(*posix.parts)
+
+
+def _archive_spec(artifact: dict[str, Any]) -> dict[str, Any] | None:
+    value = artifact.get("archive")
+    return value if isinstance(value, dict) else None
+
+
+def _artifact_roles(artifact: dict[str, Any]) -> dict[str, Path]:
+    role = artifact.get("role")
+    if role is not None:
+        return {str(role): Path()}
+    archive = _archive_spec(artifact)
+    if archive is None:
+        return {}
+    members = archive.get("members")
+    if not isinstance(members, dict):
+        return {}
+    return {str(member_role): _relative_artifact_path(member_path) for member_role, member_path in members.items()}
+
+
+def _archive_destination(root: Path, artifact: dict[str, Any]) -> Path:
+    archive = _archive_spec(artifact)
+    if archive is None:
+        raise ManagerError(f"{artifact['id']}: archive configuration is missing")
+    return _resolved_target(root, _relative_artifact_path(archive.get("extract_to")))
+
+
+def _archive_member_paths(root: Path, artifact: dict[str, Any]) -> dict[str, Path]:
+    destination = _archive_destination(root, artifact)
+    return {
+        role: _resolved_target(destination, relative)
+        for role, relative in _artifact_roles(artifact).items()
+    }
 
 
 def _artifacts_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -683,6 +748,24 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         if destination in seen_destinations:
             raise ManagerError(f"{artifact_id}: artifact destination is duplicated")
         seen_destinations.add(destination)
+        archive = artifact.get("archive")
+        if archive is not None:
+            if delivery != "download" or artifact.get("root") != "runtime" or not isinstance(archive, dict):
+                raise ManagerError(f"{artifact_id}: archives must be downloadable runtime artifacts")
+            if archive.get("format") != "zip":
+                raise ManagerError(f"{artifact_id}: archive format must be zip")
+            _relative_artifact_path(archive.get("extract_to"))
+            members = archive.get("members")
+            if not isinstance(members, dict) or not members:
+                raise ManagerError(f"{artifact_id}: archive members must map runtime roles to paths")
+            if set(members) != {"sd_cli", "sd_server"}:
+                raise ManagerError(f"{artifact_id}: runtime archives must declare sd_cli and sd_server members")
+            if artifact.get("role") is not None:
+                raise ManagerError(f"{artifact_id}: archive roles must be declared through archive members")
+            for member_role, member_path in members.items():
+                if member_role not in REQUIRED_ROLES:
+                    raise ManagerError(f"{artifact_id}: unknown archive member role {member_role}")
+                _relative_artifact_path(member_path)
         digest = str(artifact.get("sha256") or "")
         if not SHA256_RE.fullmatch(digest):
             raise ManagerError(f"{artifact_id}: sha256 must be exactly 64 hexadecimal characters")
@@ -696,8 +779,7 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         license_id = str(artifact.get("license") or "")
         if license_id not in licenses:
             raise ManagerError(f"{artifact_id}: unknown license {license_id or '(blank)'}")
-        role = artifact.get("role")
-        if role is not None:
+        for role in _artifact_roles(artifact):
             if role not in REQUIRED_ROLES:
                 raise ManagerError(f"{artifact_id}: unknown role {role}")
             if role in seen_roles and role in {"sd_cli", "sd_server", "text_encoder", "mmproj", "vae"}:
@@ -722,9 +804,10 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
             if not isinstance(profile.get(field), str) or not profile[field].strip():
                 raise ManagerError(f"{profile_id}: {field} is required")
         selected_roles = [
-            str(item["role"])
+            role
             for item in artifacts
-            if item["id"] in refs and item.get("role") is not None
+            if item["id"] in refs
+            for role in _artifact_roles(item)
         ]
         role_counts = Counter(selected_roles)
         if set(selected_roles) != REQUIRED_ROLES or any(role_counts[role] != 1 for role in REQUIRED_ROLES):
@@ -987,6 +1070,92 @@ def download_artifact(
     return target
 
 
+def _runtime_archive_ready(root: Path, artifact: dict[str, Any]) -> bool:
+    destination = _archive_destination(root, artifact)
+    try:
+        record = json.loads((destination / ".mlac-runtime-source.json").read_text(encoding="utf-8"))
+        return record == _source_identity(artifact) and all(
+            path.is_file() for path in _archive_member_paths(root, artifact).values()
+        )
+    except (OSError, json.JSONDecodeError, ManagerError):
+        return False
+
+
+def _extract_runtime_archive(archive_path: Path, root: Path, artifact: dict[str, Any]) -> None:
+    if _runtime_archive_ready(root, artifact):
+        return
+    destination = _archive_destination(root, artifact)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    stage = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.extract"
+    backup = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.backup"
+    stage.mkdir()
+    try:
+        total_size = 0
+        extracted_paths: set[str] = set()
+        with zipfile.ZipFile(archive_path) as archive:
+            for entry in archive.infolist():
+                if entry.flag_bits & 0x1:
+                    raise ManagerError(f"{artifact['id']}: encrypted runtime archives are not supported")
+                mode = (entry.external_attr >> 16) & 0xFFFF
+                if mode & 0o170000 == 0o120000:
+                    raise ManagerError(f"{artifact['id']}: runtime archive links are not allowed")
+                relative = _relative_artifact_path(entry.filename)
+                relative_key = relative.as_posix().lower()
+                if relative_key in extracted_paths:
+                    raise ManagerError(f"{artifact['id']}: runtime archive contains duplicate paths")
+                extracted_paths.add(relative_key)
+                if relative.suffix.lower() in {".gguf", ".safetensors", ".ckpt", ".pt", ".pth"}:
+                    raise ManagerError(f"{artifact['id']}: model weights are forbidden in runtime archives")
+                total_size += int(entry.file_size)
+                if total_size > MAX_RUNTIME_ARCHIVE_BYTES:
+                    raise ManagerError(f"{artifact['id']}: expanded runtime archive is too large")
+                target = _resolved_target(stage, relative)
+                if entry.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(entry) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output, CHUNK_SIZE)
+        missing = [
+            role
+            for role, relative in _artifact_roles(artifact).items()
+            if not _resolved_target(stage, relative).is_file()
+        ]
+        if missing:
+            raise ManagerError(f"{artifact['id']}: runtime archive is missing required members: {', '.join(sorted(missing))}")
+        _write_json_atomic(stage / ".mlac-runtime-source.json", _source_identity(artifact))
+        if destination.exists():
+            os.replace(destination, backup)
+        try:
+            os.replace(stage, destination)
+        except OSError:
+            if backup.exists() and not destination.exists():
+                os.replace(backup, destination)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup, ignore_errors=True)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ManagerError(f"{artifact['id']}: could not extract runtime archive: {exc}") from exc
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _materialize_artifact(root: Path, artifact: dict[str, Any], target: Path) -> None:
+    if _archive_spec(artifact) is not None:
+        _extract_runtime_archive(target, root, artifact)
+
+
+def _record_installed_paths(installed: dict[str, Path], root: Path, artifact: dict[str, Any], target: Path) -> None:
+    installed[str(artifact["id"])] = target
+    role = artifact.get("role")
+    if role is not None:
+        installed[f"@{role}"] = target
+    if _archive_spec(artifact) is not None:
+        for archive_role, member_path in _archive_member_paths(root, artifact).items():
+            installed[f"@{archive_role}"] = member_path
+
+
 def _selected_artifacts(manifest: dict[str, Any], profile_id: str) -> list[dict[str, Any]]:
     by_id = _artifacts_by_id(manifest)
     return [by_id[artifact_id] for artifact_id in manifest["profiles"][profile_id]["artifacts"]]
@@ -1012,11 +1181,11 @@ def generate_config(
     config_path: Path,
     data_dir: Path,
 ) -> dict[str, Any]:
-    roles: dict[str, str] = {}
-    for artifact in _selected_artifacts(manifest, profile_id):
-        role = artifact.get("role")
-        if role:
-            roles[str(role)] = str(installed[str(artifact["id"])].resolve())
+    roles = {
+        key[1:]: str(path.resolve())
+        for key, path in installed.items()
+        if key.startswith("@")
+    }
     if set(roles) != REQUIRED_ROLES:
         raise ManagerError("cannot generate config without every required runtime/model role")
     profile = manifest["profiles"][profile_id]
@@ -1092,11 +1261,12 @@ def install_profile(
         root = model_dir if artifact["root"] == "models" else runtime_dir
         target = _resolved_target(root, _relative_artifact_path(artifact["path"]))
         if artifact["delivery"] == "download":
-            installed[str(artifact["id"])] = download_artifact(artifact, target, opener=opener, progress=progress)
+            target = download_artifact(artifact, target, opener=opener, progress=progress)
         else:
             verify_file(target, artifact)
             progress(f"Verified bundled {target.name}")
-            installed[str(artifact["id"])] = target
+        _materialize_artifact(root, artifact, target)
+        _record_installed_paths(installed, root, artifact, target)
 
     config = generate_config(manifest, profile_id, installed, config_path, data_dir)
     if required_license_ids:
@@ -1311,6 +1481,8 @@ class PersistentModelManager:
                     return False
                 if _artifact_unverified(artifact) and not _source_record_matches(_source_record_path(target), artifact):
                     return False
+                if _archive_spec(artifact) is not None and not _runtime_archive_ready(root, artifact):
+                    return False
             return True
         except (ManagerError, OSError):
             return False
@@ -1371,7 +1543,7 @@ class PersistentModelManager:
                 continue
             source_type = str(item.get("source_type") or "packaged")
             entry = {
-                "id": item["id"], "role": item.get("role"), "url": item["url"],
+                "id": item["id"], "role": item.get("role"), "roles": sorted(_artifact_roles(item)), "url": item["url"],
                 "size": item.get("size"), "sha256": item.get("sha256") or "",
                 "source_type": source_type, "verified": not _artifact_unverified(item),
                 "unverified": _artifact_unverified(item), "overridden": str(item["id"]) in overrides,
@@ -1731,7 +1903,7 @@ class PersistentModelManager:
                     ident, stage, done, total, started
                 )
                 if artifact["delivery"] == "download":
-                    installed[str(artifact["id"])] = download_artifact(
+                    target = download_artifact(
                         artifact,
                         target,
                         opener=self.opener,
@@ -1745,7 +1917,8 @@ class PersistentModelManager:
                     callback("verifying", bundled_size, bundled_size)
                     verify_file(target, artifact)
                     callback("complete", bundled_size, bundled_size)
-                    installed[str(artifact["id"])] = target
+                _materialize_artifact(root, artifact, target)
+                _record_installed_paths(installed, root, artifact, target)
             profiles = self.registry.setdefault("profiles", {})
             profiles[profile_id] = {
                 "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -1841,7 +2014,8 @@ class PersistentModelManager:
             root = self.model_dir if artifact["root"] == "models" else self.runtime_dir
             target = _resolved_target(root, _relative_artifact_path(artifact["path"]))
             verify_file(target, artifact)
-            installed[str(artifact["id"])] = target
+            _materialize_artifact(root, artifact, target)
+            _record_installed_paths(installed, root, artifact, target)
         config = generate_config(self.manifest, profile_id, installed, self.config_path, self.data_dir)
         self.registry["active_profile"] = profile_id
         _write_json_atomic(self.registry_path, self.registry)
@@ -1873,6 +2047,10 @@ class PersistentModelManager:
             partial = target.with_name(target.name + ".part")
             partial.unlink(missing_ok=True)
             _partial_record_path(partial).unlink(missing_ok=True)
+            if _archive_spec(artifact) is not None:
+                extraction = _archive_destination(root, artifact)
+                if extraction.is_dir():
+                    shutil.rmtree(extraction)
         del profiles[profile_id]
         _write_json_atomic(self.registry_path, self.registry)
         self._broadcast()
@@ -1888,8 +2066,7 @@ class PersistentModelManager:
 def default_paths() -> tuple[Path, Path, Path, Path]:
     local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     state_root = local_app_data / "MLACStudio"
-    app_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-    return state_root / "models", app_dir / "runtime", state_root / "config.json", state_root / "data"
+    return state_root / "models", state_root / "runtime", state_root / "config.json", state_root / "data"
 
 
 def _default_manifest() -> Path:

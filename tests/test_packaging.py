@@ -17,6 +17,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertNotIn("python", source.lower())
         self.assertNotIn("cuda", source.lower())
         self.assertNotIn("sd-server", source.lower())
+        self.assertNotIn("nvidia-runtime", source.lower())
         self.assertIn("Model weights are forbidden", source)
         self.assertIn("VerifyEnvelope", source)
         self.assertIn("AddRange", source)
@@ -31,6 +32,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("mlac-update-public.json", spec)
         self.assertIn("binaries=[]", spec)
         self.assertIn("Core component must not contain native inference runtimes", build)
+        self.assertNotIn("RuntimeDirectory", build)
 
     def test_component_release_is_signed_deterministic_and_never_contains_models(self) -> None:
         tools = (ROOT / "packaging" / "release-tools.py").read_text(encoding="utf-8")
@@ -40,8 +42,22 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("MODEL_SUFFIXES", tools)
         self.assertIn("sign_payload", tools)
         self.assertIn("core=core=", components)
-        self.assertIn("nvidia-runtime=nvidia-runtime=", components)
+        self.assertNotIn("common-runtime", components)
+        self.assertNotIn("nvidia-runtime", components)
+        self.assertNotIn("RuntimeDirectory", components)
         self.assertIn("I APPROVE MLAC RELEASE", github)
+
+    def test_github_release_build_uses_pinned_on_demand_runtime_source(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release-draft.yml").read_text(encoding="utf-8")
+        template = json.loads((ROOT / "packaging" / "release-manifest.example.json").read_text(encoding="utf-8"))
+        runtime = next(item for item in template["artifacts"] if item["root"] == "runtime")
+        self.assertNotIn("MLAC_RUNTIME_DIRECTORY", workflow)
+        self.assertIn("MLAC_RUNTIME_URL", workflow)
+        self.assertIn("MLAC_RUNTIME_SIZE", workflow)
+        self.assertIn("MLAC_RUNTIME_SHA256", workflow)
+        self.assertEqual(runtime["delivery"], "download")
+        self.assertEqual(runtime["archive"]["format"], "zip")
+        self.assertEqual(set(runtime["archive"]["members"]), {"sd_cli", "sd_server"})
 
     def test_packaged_hf_sources_are_exact_and_release_build_validates_them(self) -> None:
         template = json.loads((ROOT / "packaging" / "release-manifest.example.json").read_text(encoding="utf-8"))

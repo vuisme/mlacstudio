@@ -9,6 +9,7 @@ import sys
 import unittest
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -120,8 +121,8 @@ def valid_manifest(contents: dict[str, bytes] | None = None) -> dict:
         "vae": b"vae",
     }
     artifacts = [
-        artifact("sd-cli", "sd_cli", contents["sd-cli"], delivery="bundled", root="runtime", path="sd-cli.exe"),
-        artifact("sd-server", "sd_server", contents["sd-server"], delivery="bundled", root="runtime", path="sd-server.exe"),
+        artifact("sd-cli", "sd_cli", contents["sd-cli"], root="runtime", path="sd-cli.exe"),
+        artifact("sd-server", "sd_server", contents["sd-server"], root="runtime", path="sd-server.exe"),
         artifact("transformer", "transformer", contents["transformer"]),
         artifact("text", "text_encoder", contents["text"]),
         artifact("mmproj", "mmproj", contents["mmproj"]),
@@ -416,6 +417,29 @@ class DownloadTests(unittest.TestCase):
 
 
 class HuggingFaceSourceTests(unittest.TestCase):
+    def test_hydrate_fills_only_immutable_hugging_face_metadata(self) -> None:
+        manifest = valid_manifest()
+        item = manifest["artifacts"][2]
+        item["size"] = 0
+        item["sha256"] = ""
+        repo_id, revision, file_path = manager.parse_hf_file_url(item["url"])
+        api_url = f"https://huggingface.co/api/models/{repo_id}/revision/{revision}?blobs=true"
+        response = {"sha": revision, "siblings": [{
+            "rfilename": file_path, "lfs": {"size": 321, "sha256": "d" * 64},
+        }]}
+        hydrated = manager.hydrate_remote_artifacts(
+            manifest, opener=MappingOpener({api_url: json.dumps(response).encode()})
+        )
+        self.assertEqual(hydrated["artifacts"][2]["size"], 321)
+        self.assertEqual(hydrated["artifacts"][2]["sha256"], "d" * 64)
+
+        runtime = hydrated["artifacts"][0]
+        runtime["size"] = 0
+        runtime["sha256"] = ""
+        runtime["url"] = "https://github.com/example/project/releases/download/v1/runtime.zip"
+        with self.assertRaisesRegex(manager.ManagerError, "require pinned"):
+            manager.hydrate_remote_artifacts(hydrated)
+
     def test_resolve_requires_lfs_metadata_and_returns_server_expected_values(self) -> None:
         manifest = manager.validate_manifest(valid_manifest())
         revision = "b" * 40
@@ -582,11 +606,9 @@ class InstallTests(unittest.TestCase):
             state / "config.json",
             state / "license-acceptance.json",
         ]
-        generated.extend(manager._source_record_path(path) for path in list(generated) if path.parent == models)
+        generated.extend(manager._source_record_path(path) for path in list(generated) if path.suffix != ".json")
         remove_files(*generated)
         try:
-            (runtime / "sd-cli.exe").write_bytes(contents["sd-cli"])
-            (runtime / "sd-server.exe").write_bytes(contents["sd-server"])
             config_path = state / "config.json"
             manager.install_profile(
                 manifest,
@@ -609,6 +631,79 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(acceptance["acceptances"][0]["version"], "model-2.1")
         finally:
             remove_files(*generated)
+
+    def test_install_extracts_verified_runtime_archive_and_uses_declared_entry_points(self) -> None:
+        runtime_buffer = io.BytesIO()
+        with zipfile.ZipFile(runtime_buffer, "w") as archive:
+            archive.writestr("bin/sd-cli.exe", b"cli")
+            archive.writestr("bin/sd-server.exe", b"server")
+            archive.writestr("bin/cudart64_12.dll", b"cuda")
+        runtime_archive = runtime_buffer.getvalue()
+        contents = {
+            "runtime": runtime_archive,
+            "transformer": b"transformer", "text": b"text", "mmproj": b"projector", "vae": b"vae",
+        }
+        manifest = valid_manifest({
+            "sd-cli": b"unused", "sd-server": b"unused", "transformer": contents["transformer"],
+            "text": contents["text"], "mmproj": contents["mmproj"], "vae": contents["vae"],
+        })
+        runtime_artifact = artifact(
+            "runtime", "sd_cli", runtime_archive, root="runtime", path="downloads/runtime.zip"
+        )
+        runtime_artifact.pop("role")
+        runtime_artifact["archive"] = {
+            "format": "zip", "extract_to": "native", "members": {
+                "sd_cli": "bin/sd-cli.exe", "sd_server": "bin/sd-server.exe",
+            },
+        }
+        manifest["artifacts"] = [runtime_artifact, *manifest["artifacts"][2:]]
+        for profile in manifest["profiles"].values():
+            profile["artifacts"] = ["runtime", *profile["artifacts"][2:]]
+        manifest = manager.validate_manifest(manifest)
+        payloads = {item["url"]: contents[item["id"]] for item in manifest["artifacts"]}
+        root = WORKSPACE / "tests" / "runtime" / uuid.uuid4().hex
+        root.mkdir(parents=True)
+        config_path = root / "state" / "config.json"
+        manager.install_profile(
+            manifest, "medium", accept_license=True, model_dir=root / "models",
+            runtime_dir=root / "runtime", config_path=config_path, data_dir=root / "data",
+            opener=MappingOpener(payloads), progress=lambda _: None,
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(Path(config["sd_cli"]), (root / "runtime" / "native" / "bin" / "sd-cli.exe").resolve())
+        self.assertTrue((root / "runtime" / "native" / "bin" / "cudart64_12.dll").is_file())
+
+    def test_runtime_archive_rejects_path_traversal(self) -> None:
+        runtime_buffer = io.BytesIO()
+        with zipfile.ZipFile(runtime_buffer, "w") as archive:
+            archive.writestr("bin/sd-cli.exe", b"cli")
+            archive.writestr("bin/sd-server.exe", b"server")
+            archive.writestr("../escape.dll", b"escape")
+        runtime_archive = runtime_buffer.getvalue()
+        manifest = valid_manifest()
+        runtime_artifact = artifact(
+            "runtime", "sd_cli", runtime_archive, root="runtime", path="downloads/runtime.zip"
+        )
+        runtime_artifact.pop("role")
+        runtime_artifact["archive"] = {
+            "format": "zip", "extract_to": "native", "members": {
+                "sd_cli": "bin/sd-cli.exe", "sd_server": "bin/sd-server.exe",
+            },
+        }
+        manifest["artifacts"] = [runtime_artifact, *manifest["artifacts"][2:]]
+        for profile in manifest["profiles"].values():
+            profile["artifacts"] = ["runtime", *profile["artifacts"][2:]]
+        manifest = manager.validate_manifest(manifest)
+        root = WORKSPACE / "tests" / "runtime" / uuid.uuid4().hex
+        root.mkdir(parents=True)
+        with self.assertRaisesRegex(manager.ManagerError, "safe relative path"):
+            manager.install_profile(
+                manifest, "medium", accept_license=True, model_dir=root / "models",
+                runtime_dir=root / "runtime", config_path=root / "state" / "config.json",
+                data_dir=root / "data", opener=MappingOpener({runtime_artifact["url"]: runtime_archive}),
+                progress=lambda _: None,
+            )
+        self.assertFalse((root / "runtime" / "escape.dll").exists())
 
 
 class PersistentManagerTests(unittest.TestCase):
@@ -856,4 +951,3 @@ class PersistentManagerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

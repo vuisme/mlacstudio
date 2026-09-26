@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
@@ -25,10 +26,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--token-env", default="HF_TOKEN")
+    parser.add_argument("--hydrate", action="store_true", help="fill missing immutable Hugging Face LFS metadata")
     args = parser.parse_args()
     manager = load_manager()
     try:
-        manifest = manager.load_manifest(args.manifest)
+        if args.hydrate:
+            manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+            manifest = manager.hydrate_remote_artifacts(
+                manifest, token=os.environ.get(args.token_env) or None
+            )
+            temporary = args.manifest.with_suffix(args.manifest.suffix + ".tmp")
+            temporary.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+            os.replace(temporary, args.manifest)
+            print(f"hydrated pinned metadata in {args.manifest}")
+            return 0
+        else:
+            manifest = manager.load_manifest(args.manifest)
         results = manager.validate_remote_artifacts(manifest, token=os.environ.get(args.token_env) or None)
     except manager.ManagerError as exc:
         print(f"error: {exc}", file=sys.stderr)

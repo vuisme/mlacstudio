@@ -14,5 +14,10 @@ GitHub environments:
 - `release-draft`: protects signing and draft creation. Configure required reviewers.
 - `production-release`: protects publishing, promotion, and rollback. Configure owner approval.
 
-Repository variable:
-- `MLAC_RUNTIME_DIRECTORY`: a path available on the selected release runner containing `stable-diffusion.cpp`. Large component release builds normally require a self-hosted Windows runner because GitHub-hosted runners do not carry this runtime.
+Repository variables:
+- `MLAC_RUNTIME_URL`: immutable HTTPS URL for the tested native runtime ZIP.
+- `MLAC_RUNTIME_SIZE`: exact runtime ZIP byte size.
+- `MLAC_RUNTIME_SHA256`: lowercase SHA-256 of the runtime ZIP.
+
+The release runner records these values in the bundled model manifest but never downloads or packages the native
+runtime. End-user onboarding downloads and verifies it later on demand.

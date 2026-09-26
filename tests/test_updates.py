@@ -115,15 +115,19 @@ class UpdateTests(unittest.TestCase):
     def test_component_selection_and_mandatory_summary(self) -> None:
         data = self.archive_bytes()
         payload = self.payload(data, mandatory=True)
-        payload["components"].extend([
-            {"id": "common-runtime", "kind": "common-runtime", "version": "0.3.1", "url": "https://github.com/vuisme/mlacstudio/releases/download/v0.3.1/common.zip", "size": 1, "sha256": "a" * 64},
-            {"id": "nvidia-runtime", "kind": "nvidia-runtime", "version": "0.3.1", "min_driver_major": 525, "url": "https://github.com/vuisme/mlacstudio/releases/download/v0.3.1/nvidia.zip", "size": 2, "sha256": "b" * 64},
-        ])
         selected = updater.select_components(payload, {"driver": "552.12", "vram_mib": 12288})
-        self.assertEqual([item["id"] for item in selected], ["core", "common-runtime", "nvidia-runtime"])
+        self.assertEqual([item["id"] for item in selected], ["core"])
         self.assertTrue(updater.update_summary(payload, selected)["security_mandatory"])
-        cpu = updater.select_components(payload, None)
-        self.assertNotIn("nvidia-runtime", [item["id"] for item in cpu])
+
+    def test_update_metadata_rejects_native_runtime_components(self) -> None:
+        payload = self.payload(self.archive_bytes())
+        payload["components"].append({
+            "id": "nvidia-runtime", "kind": "nvidia-runtime", "version": "0.3.1",
+            "url": "https://github.com/vuisme/mlacstudio/releases/download/v0.3.1/nvidia.zip",
+            "size": 2, "sha256": "b" * 64,
+        })
+        with self.assertRaisesRegex(updater.UpdateError, "invalid component kind"):
+            updater.validate_payload(payload)
 
     def test_resume_interruption_and_hash_validation(self) -> None:
         root = self.root()

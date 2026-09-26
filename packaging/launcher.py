@@ -56,12 +56,14 @@ def _active_component_path(component_id: str) -> Path | None:
 
 
 def _runtime_dir() -> Path:
+    runtime = _state_root() / "runtime"
     common = _active_component_path("common-runtime")
     nvidia = _active_component_path("nvidia-runtime")
-    search = [str(path) for path in (nvidia, common) if path is not None]
+    # Keep legacy updater-owned runtime directories on PATH for existing installs.
+    search = [str(path) for path in (nvidia, common, runtime) if path is not None]
     if search:
         os.environ["PATH"] = os.pathsep.join(search + [os.environ.get("PATH", "")])
-    return common or (_application_dir() / "runtime")
+    return runtime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -181,7 +183,7 @@ def maybe_start_update() -> str:
         payload = result.payload
         if payload is None or not updater.is_newer(str(payload["version"]), updater.APP_VERSION):
             return "continue"
-        selected = updater.select_components(payload, updater.detect_nvidia())
+        selected = updater.select_components(payload)
         summary = updater.update_summary(payload, selected)
     except updater.UpdateError:
         return "continue"

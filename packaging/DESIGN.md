@@ -14,13 +14,16 @@
 `MLAC-Studio-Setup-<version>.exe` is a small .NET Framework WinExe compiled from
 `bootstrap/MLACStudioBootstrap.cs`. It contains no Python runtime, CUDA DLLs, stable-diffusion.cpp binaries, or models.
 
-Signed metadata selects these independently versioned and content-addressed components:
+Signed update metadata selects one independently versioned and content-addressed application component:
 
 | Component | Contents | Selection |
 | --- | --- | --- |
 | `core` | MLACStudio.exe, Python application files, static UI, notices, model manifest | Always |
-| `common-runtime` | sd-cli.exe, sd-server.exe, CPU/common DLLs and notices | Always |
-| `nvidia-runtime` | CUDA/NVIDIA runtime DLLs | NVIDIA driver meets signed minimum |
+
+The native stable-diffusion.cpp/NVIDIA runtime is not an application update component. The model manifest pins an
+external HTTPS runtime archive by byte size and SHA-256. First-run onboarding downloads, verifies, and safely extracts
+that archive under `%LOCALAPPDATA%\MLACStudio\runtime` alongside the selected model artifacts. Explicit custom sources
+may omit integrity metadata only after the admin accepts the persistent unverified-source warning.
 
 Installed objects use `components/<id>/<version>-<sha-prefix>/`. The atomic `components/active.json` pointer records
 the active and one previous object per component. An activation journal restores the prior pointer after interruption.
@@ -30,7 +33,7 @@ Only changed SHA-256 objects download. Explicit rollback swaps active/previous; 
 
 - Metadata is canonical JSON signed with RSA-SHA256 and a bundled public key. The available Windows framework has no
   dependable built-in Ed25519 implementation; unsigned, malformed, wrong-key, or invalid signatures are rejected.
-- Component URLs must be public `github.com/vuisme/mlacstudio` release assets and include byte size plus SHA-256.
+- Application component URLs must be public `github.com/vuisme/mlacstudio` release assets and include byte size plus SHA-256.
 - `stable` is default. `beta` and `dev` require an explicit persisted opt-in.
 - Startup checks use ETag caching. Prompts show version, channel, changelog, changed components, bytes, restart, and any
   data migration. A migration always needs a separate explicit confirmation.

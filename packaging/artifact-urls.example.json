@@ -1,4 +1,9 @@
 {
+  "runtime-stable-diffusion-cpp-cuda12": {
+    "url": "https://github.com/OWNER/REPOSITORY/releases/download/TAG/stable-diffusion-cpp-cuda12.zip",
+    "size": 123456789,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
   "transformer-q4-0": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q4_0.gguf",
   "transformer-q4-k-m": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q4_K_M.gguf",
   "transformer-q5-k-m": "https://huggingface.co/OWNER/REPOSITORY/resolve/COMMIT/qwen-image-2.1-UC-Q5_K_M.gguf",

@@ -221,7 +221,7 @@ namespace MLACStudioBootstrap
                 string kind = Convert.ToString(component["kind"]);
                 string url = Convert.ToString(component["url"]);
                 string hash = Convert.ToString(component["sha256"]);
-                if (id.ToLowerInvariant().Contains("model") || (kind != "core" && kind != "common-runtime" && kind != "nvidia-runtime"))
+                if (id.ToLowerInvariant().Contains("model") || kind != "core")
                     throw new InvalidOperationException("Invalid update component: " + id);
                 if (!url.StartsWith("https://github.com/vuisme/mlacstudio/releases/download/", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Component is not a public MLAC Studio GitHub release asset: " + id);
@@ -245,42 +245,13 @@ namespace MLACStudioBootstrap
         private static ArrayList SelectComponents(Dictionary<string, object> payload)
         {
             ArrayList selected = new ArrayList();
-            Dictionary<string, object> gpu = DetectGpu();
             foreach (object raw in (ArrayList)payload["components"])
             {
                 Dictionary<string, object> component = (Dictionary<string, object>)raw;
                 string kind = Convert.ToString(component["kind"]);
-                if (kind == "core" || kind == "common-runtime") selected.Add(component);
-                else if (kind == "nvidia-runtime" && gpu != null)
-                {
-                    int minimum = component.ContainsKey("min_driver_major") ? Convert.ToInt32(component["min_driver_major"]) : 0;
-                    if (Convert.ToInt32(gpu["driver_major"]) >= minimum) selected.Add(component);
-                }
+                if (kind == "core") selected.Add(component);
             }
             return selected;
-        }
-
-        private static Dictionary<string, object> DetectGpu()
-        {
-            try
-            {
-                ProcessStartInfo start = new ProcessStartInfo("nvidia-smi", "--query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits");
-                start.UseShellExecute = false;
-                start.CreateNoWindow = true;
-                start.WindowStyle = ProcessWindowStyle.Hidden;
-                start.RedirectStandardOutput = true;
-                using (Process process = Process.Start(start))
-                {
-                    string line = process.StandardOutput.ReadLine();
-                    if (!process.WaitForExit(10000) || String.IsNullOrWhiteSpace(line)) return null;
-                    string[] parts = line.Split(',');
-                    return new Dictionary<string, object> {
-                        { "name", parts[0].Trim() }, { "vram_mib", Int32.Parse(parts[1].Trim()) },
-                        { "driver_major", Int32.Parse(parts[2].Trim().Split('.')[0]) }
-                    };
-                }
-            }
-            catch { return null; }
         }
 
         private static void Install(Dictionary<string, object> payload, string stateRoot, bool explicitRollback)

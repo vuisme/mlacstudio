@@ -750,7 +750,7 @@ function renderHfSource() {
     $("customSourceAck").checked = Boolean(source.responsibility_acknowledged);
     $("hfSourceFiles").replaceChildren(...(source.artifacts || []).map((artifact) => el("div", { class: "source-file" },
       el("label", { for: `hf-source-${artifact.id}` },
-        el("b", { text: `${artifact.id} / ${artifact.role}` }),
+        el("b", { text: `${artifact.id} / ${(artifact.roles || [artifact.role]).filter(Boolean).join(", ")}` }),
         el("small", { text: artifact.unverified ? "UNVERIFIED - no SHA-256" : `${formatBytes(artifact.size)} / ${artifact.sha256}` }),
       ),
       el("div", { class: "source-entry", "data-artifact-id": artifact.id },

@@ -2,7 +2,7 @@
 type: decision
 title: Inspect release candidate
 ---
-Inspect sizes, component selection, clean install, legacy migration, interruption recovery, update channels, rollback, downgrade protection, and data-migration declaration. Route to approval only if every required check passes; otherwise return to build/test.
+Inspect sizes, core-only update metadata, absence of runtime/model payloads, clean onboarding runtime download, legacy migration, interruption recovery, update channels, rollback, downgrade protection, and data-migration declaration. Route to approval only if every required check passes; otherwise return to build/test.
 
 ## Output
 ```json
