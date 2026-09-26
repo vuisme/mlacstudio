@@ -290,7 +290,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_mask_composite_resizes_and_preserves_hard_zero_pixels(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        root.mkdir(parents=True)
+        root.mkdir(parents=True, exist_ok=True)
         source = root / "source.png"
         output = root / "output.png"
         mask = root / "mask.png"
