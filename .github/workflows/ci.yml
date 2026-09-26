@@ -26,6 +26,10 @@ jobs:
       - name: Compile Python
         shell: pwsh
         run: python -m compileall -q web packaging tests
+      - name: Reset generated test fixtures
+        shell: pwsh
+        run: Remove-Item tests/runtime, tests/packaging_fixtures -Recurse -Force -ErrorAction SilentlyContinue
+
       - name: Run unit tests
         shell: pwsh
         run: python -m unittest discover -s tests -v
