@@ -76,7 +76,7 @@ jobs:
       - name: Verify signed manifest and payload policy
         shell: pwsh
         run: |
-          python packaging/release-tools.py verify --manifest "dist/mlac-release/MLAC-Studio-${{ inputs.channel }}.json" --public-key packaging/keys/mlac-update-public.json
+          python -c "import json,sys; from pathlib import Path; sys.path.insert(0,'packaging'); from updater import verify_envelope; verify_envelope(json.loads(Path(r'dist/mlac-release/MLAC-Studio-${{ inputs.channel }}.json').read_text(encoding='utf-8')), Path(r'packaging/keys/mlac-update-public.json')); print('Signed manifest valid')"
           if (Get-ChildItem dist/mlac-release -Recurse -File | Where-Object Extension -In '.gguf','.safetensors') { throw 'Model weights must not be released as app components' }
           if (Get-ChildItem dist/mlac-release -File | Where-Object Name -Match '(common|nvidia)-runtime') { throw 'Native runtime component assets must not be released' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
