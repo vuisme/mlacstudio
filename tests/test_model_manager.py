@@ -569,6 +569,7 @@ class InstallTests(unittest.TestCase):
         }
         root = fixture_dir("install")
         runtime = root / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
         models = root / "models"
         state = root / "state"
         generated = [
