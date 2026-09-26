@@ -72,7 +72,7 @@ jobs:
           $flags=@{}
           if ('${{ inputs.security_mandatory }}' -eq 'true') { $flags.SecurityMandatory=$true }
           $python=(Get-Command python -ErrorAction Stop).Source
-          ./packaging/build.ps1 -ConfigPath tests/packaging_fixtures/release-config.json -UrlMapPath "$env:RUNNER_TEMP\mlac-artifact-urls.json" -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -PublishedAt '${{ inputs.published_at }}' -Python $python -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -Changelog '${{ inputs.changelog }}' -SkipPortable @flags
+          ./packaging/build.ps1 -UrlMapPath "$env:RUNNER_TEMP\mlac-artifact-urls.json" -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -PublishedAt '${{ inputs.published_at }}' -ConfigPath packaging/config.release.json -Python $python -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -Changelog '${{ inputs.changelog }}' -SkipPortable @flags
       - name: Verify signed manifest and payload policy
         shell: pwsh
         run: |
