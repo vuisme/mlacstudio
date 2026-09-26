@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -123,7 +123,7 @@ class LauncherTests(unittest.TestCase):
     @staticmethod
     def runtime_dir() -> Path:
         path = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         return path
 
     def controller(self, instance_path: Path, **kwargs):
@@ -324,3 +324,4 @@ class LauncherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import importlib.util
@@ -614,7 +614,7 @@ class PersistentManagerTests(unittest.TestCase):
     @staticmethod
     def runtime_dir() -> Path:
         path = WORKSPACE / "tests" / "runtime" / uuid.uuid4().hex
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @staticmethod
@@ -855,3 +855,4 @@ class PersistentManagerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

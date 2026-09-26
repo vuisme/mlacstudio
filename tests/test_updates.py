@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import hashlib
@@ -45,7 +45,7 @@ class Response:
 class UpdateTests(unittest.TestCase):
     def root(self) -> Path:
         path = ROOT / "tests" / "runtime" / uuid.uuid4().hex
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         return path
 
     def key(self, root: Path) -> Path:
@@ -182,3 +182,4 @@ class UpdateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
