@@ -1,4 +1,4 @@
-﻿name: Build Draft Release
+name: Build Draft Release
 
 on:
   workflow_dispatch:
@@ -53,17 +53,12 @@ jobs:
           if (-not $env:MLAC_UPDATE_SIGNING_KEY_B64) { throw 'Signing secret is missing' }
           $bytes=[Convert]::FromBase64String($env:MLAC_UPDATE_SIGNING_KEY_B64)
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\mlac-signing.xml",$bytes)
-      - name: Build core onedir
-        shell: pwsh
-        run: |
-          python -m PyInstaller --noconfirm --clean packaging/mlac-studio.spec
-      - name: Build signed component release
+      - name: Build application and signed component release
         shell: pwsh
         run: |
           $flags=@{}
           if ('${{ inputs.security_mandatory }}' -eq 'true') { $flags.SecurityMandatory=$true }
-          ./packaging/build-components.ps1 -CoreDirectory dist/MLACStudio -RuntimeDirectory '${{ vars.MLAC_RUNTIME_DIRECTORY }}' -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -PublishedAt '${{ inputs.published_at }}' -Changelog '${{ inputs.changelog }}' -OutputDirectory dist/mlac-release @flags
-          ./packaging/build-bootstrap.ps1 -Version '${{ inputs.version }}' -OutputDirectory dist/mlac-release
+          ./packaging/build.ps1 -RuntimeDirectory '${{ vars.MLAC_RUNTIME_DIRECTORY }}' -UrlMapPath packaging/artifact-urls.json -PrivateKeyPath "$env:RUNNER_TEMP\mlac-signing.xml" -PublishedAt '${{ inputs.published_at }}' -Python python -Version '${{ inputs.version }}' -Channel '${{ inputs.channel }}' -Changelog '${{ inputs.changelog }}' -SkipPortable @flags
       - name: Verify signed manifest and payload policy
         shell: pwsh
         run: |

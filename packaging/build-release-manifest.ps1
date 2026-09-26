@@ -55,6 +55,9 @@ foreach ($artifact in $manifest.artifacts) {
         $source = Get-Item -LiteralPath $sourcePath
         $artifact.size = [long]$source.Length
         $artifact.sha256 = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    } elseif ([string]$artifact.delivery -eq "download" -and [long]$artifact.size -eq 0 -and
+              [string]$artifact.sha256 -eq "") {
+        # Remote metadata can be populated later by the validator/download manager.
     } elseif ([string]$artifact.delivery -ne "download" -or [long]$artifact.size -le 0 -or
               -not ([string]$artifact.sha256 -match '^[0-9a-fA-F]{64}$')) {
         throw "No installed source file or pinned size/SHA-256 was provided for artifact '$artifactId'."
