@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.2"
 CHANNELS = {"stable", "beta", "dev"}
 DEFAULT_CHANNEL = "stable"
 MANIFEST_URL = "https://github.com/vuisme/mlacstudio/releases/latest/download/MLAC-Studio-{channel}.json"

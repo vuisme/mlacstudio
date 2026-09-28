@@ -449,6 +449,27 @@ class TrayController:
         if icon is not None:
             icon.update_menu()
 
+    def open_updates(self, icon: Any = None, item: Any = None) -> None:
+        del icon, item
+        webbrowser.open(self.url + "#updates")
+
+    def check_for_updates(self, icon: Any = None, item: Any = None) -> None:
+        del item
+        try:
+            self.app.updates.start_check()
+        except updater.UpdateError as exc:
+            _message("MLAC Studio Update", str(exc), error=True)
+        self.open_updates()
+        if icon is not None:
+            icon.update_menu()
+
+    def update_status_text(self, item: Any = None) -> str:
+        del item
+        state = self.app.updates.status()
+        if state.get("status") == "available" and state.get("latest"):
+            return f"Update available: {state['latest']['version']}"
+        return f"Updates: {state.get('stage') or 'Ready'}"
+
     def exit(self, icon: Any = None, item: Any = None) -> None:
         del item
         self.shutdown(icon)
@@ -486,6 +507,10 @@ class TrayController:
             tray.Menu.SEPARATOR,
             tray.MenuItem(self.model_status_text, None, enabled=False),
             tray.MenuItem("Unload model", self.unload_model, enabled=self.can_unload),
+            tray.Menu.SEPARATOR,
+            tray.MenuItem(self.update_status_text, None, enabled=False),
+            tray.MenuItem("Check for updates", self.check_for_updates),
+            tray.MenuItem("Open Updates", self.open_updates),
             tray.MenuItem("Run at Windows startup", self.toggle_startup, checked=self.startup_checked),
             tray.Menu.SEPARATOR,
             tray.MenuItem("Exit", self.exit),

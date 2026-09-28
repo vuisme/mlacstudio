@@ -309,6 +309,7 @@ dialog .acts .primary { width: auto; padding: 6px 14px; font-size: 12px; }
 .update-version-block.latest { text-align: right; }
 .update-version-block.latest strong { color: #77d9bd; }
 .update-arrow { color: #70988a; font: 700 18px var(--mono); }
+.update-test-badge { display:inline-flex; margin-left:.45rem; padding:.15rem .45rem; border:1px solid var(--line); border-radius:999px; color:var(--accent); font-size:.68rem; font-weight:700; vertical-align:middle; }
 .update-state { position: absolute; right: 12px; bottom: -11px; padding: 3px 9px; border: 3px solid #fbfaf5; border-radius: 999px; background: #e7a33b; color: #2e210d; font: 700 10px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .update-state.ok { background: #58b89d; color: #0e3028; }
 .update-state.error { background: #e66b5d; color: #fff; }

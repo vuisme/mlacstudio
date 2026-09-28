@@ -130,6 +130,7 @@ class LauncherTests(unittest.TestCase):
         app = kwargs.pop("app", mock.Mock())
         app.model_state.return_value = {"status": "ready", "pid": 1234}
         app.can_unload_model.return_value = True
+        app.updates.status.return_value = {"status": "up_to_date", "stage": "MLAC Studio is up to date", "latest": None}
         return launcher.TrayController(
             app,
             kwargs.pop("httpd", mock.Mock()),
@@ -220,11 +221,12 @@ class LauncherTests(unittest.TestCase):
         menu = controller.build_menu()
         items = [item for item in menu if isinstance(item, FakeMenuItem)]
         self.assertEqual([item.text for item in items if isinstance(item.text, str)], [
-            "Open Studio", "Unload model", "Run at Windows startup", "Exit"
+            "Open Studio", "Unload model", "Check for updates", "Open Updates", "Run at Windows startup", "Exit"
         ])
-        status = next(item for item in items if callable(item.text))
-        self.assertEqual(status.text(), "Model: Ready (PID 1234)")
-        self.assertFalse(status.options["enabled"])
+        statuses = [item for item in items if callable(item.text)]
+        self.assertEqual(statuses[0].text(), "Model: Ready (PID 1234)")
+        self.assertEqual(statuses[1].text(), "Updates: MLAC Studio is up to date")
+        self.assertTrue(all(not item.options["enabled"] for item in statuses))
 
         controller.run()
         self.assertTrue(controller.icon.ran)
@@ -323,7 +325,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_signed_mandatory_update_blocks_startup_when_declined(self) -> None:
         payload = {
-            "version": "0.3.1", "channel": "stable", "security_mandatory": True,
+            "version": "0.3.3", "channel": "stable", "security_mandatory": True,
             "restart_required": True, "changelog": "security fix", "data_migration": None,
             "components": [{"id": "core", "kind": "core", "size": 10}],
         }
