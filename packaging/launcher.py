@@ -165,11 +165,16 @@ def _update_settings() -> dict[str, Any]:
 
 
 def _write_update_settings(value: dict[str, Any]) -> None:
-    path = _state_root() / "update-settings.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    updater.write_settings(_state_root(), value)
+
+
+def bootstrap_path() -> Path | None:
+    local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    candidates = [
+        local / "Programs" / "MLACStudio" / "MLACStudioBootstrap.exe",
+        _application_dir() / "MLACStudioBootstrap.exe",
+    ]
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def maybe_start_update() -> str:
@@ -216,18 +221,15 @@ def maybe_start_update() -> str:
         warning=True,
     ):
         return "blocked" if mandatory else "continue"
-    local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    bootstrap = local / "Programs" / "MLACStudio" / "MLACStudioBootstrap.exe"
-    if not bootstrap.is_file():
-        bootstrap = _application_dir() / "MLACStudioBootstrap.exe"
-    if not bootstrap.is_file():
+    bootstrap = bootstrap_path()
+    if bootstrap is None:
         _message("MLAC Studio Update", "The updater executable is missing. Re-run the MLAC Studio bootstrap installer.", error=True)
         return "blocked" if mandatory else "continue"
     cached = _state_root() / "updates" / f"{channel}.json"
     argv = [str(bootstrap), "--manifest-file", str(cached), "--channel", channel]
     if summary["data_migration"]:
         argv.append("--approve-data-migration")
-    subprocess.Popen(argv, close_fds=True, **updater_process_options())
+    subprocess.Popen(argv, close_fds=True, shell=False, **updater_process_options())
     return "updating"
 
 
@@ -451,6 +453,25 @@ class TrayController:
         del item
         self.shutdown(icon)
 
+    def restart_through_bootstrap(self) -> None:
+        bootstrap = bootstrap_path()
+        if bootstrap is None:
+            raise RuntimeError("The MLAC Studio bootstrap is missing. Re-run the bootstrap installer.")
+
+        def handoff() -> None:
+            # Let the API response reach the browser before closing the local server.
+            time.sleep(0.35)
+            self.shutdown()
+            subprocess.Popen(
+                [str(bootstrap), "--launch"],
+                close_fds=True,
+                shell=False,
+                **updater_process_options(),
+            )
+
+        worker = threading.Thread(target=handoff, name="mlac-bootstrap-restart", daemon=False)
+        worker.start()
+
     def _pystray(self) -> Any:
         if self.pystray is None:
             import pystray
@@ -533,15 +554,6 @@ def main() -> int:
         webbrowser.open(read_instance_url(instance_path, url))
         return 0
 
-    update_action = maybe_start_update()
-    if update_action == "updating":
-        mutex.close()
-        return 0
-    if update_action == "blocked":
-        mutex.close()
-        _message("MLAC Studio Update", "MLAC Studio cannot start until the required update is installed.", error=True)
-        return 3
-
     resources = _resource_root()
     server.STATIC_DIR = resources / "web" / "static"
     server.REPO_ROOT = _application_dir()
@@ -555,11 +567,13 @@ def main() -> int:
             runtime_dir=_runtime_dir(),
             model_dir=_state_root() / "models",
             model_manager_path=resources / "model-manager.py",
+            update_state_root=_state_root(),
         )
         httpd = server.StudioServer(("127.0.0.1", port), server.handler_for(app))
         server_thread = threading.Thread(target=httpd.serve_forever, name="mlac-studio-http", daemon=True)
         server_thread.start()
         controller = TrayController(app, httpd, server_thread, url, mutex, instance_path)
+        app.set_restart_handler(controller.restart_through_bootstrap)
         write_instance_info(instance_path, url)
         print(f"MLAC Studio listening on {url}", flush=True)
         if not args.no_browser and not args.startup:

@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
@@ -68,7 +69,13 @@ class ApiTests(unittest.TestCase):
         self.root.mkdir(parents=True)
         self.config = self.root / "config.json"
         self.config.write_text(json.dumps({"data_dir": "ignored", **{key: __file__ for key in ("sd_cli", "transformer", "text_encoder", "mmproj", "vae")}}), encoding="utf-8")
-        self.app = StudioApp(self.config, data_dir=self.root / "data", adapter=NoopAdapter(), start_worker=False)
+        self.app = StudioApp(
+            self.config,
+            data_dir=self.root / "data",
+            adapter=NoopAdapter(),
+            start_worker=False,
+            start_update_check=False,
+        )
         self.server = StudioServer(("127.0.0.1", 0), handler_for(self.app))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -162,6 +169,32 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200, payload)
         self.assertEqual(json.loads(payload)["idle_timeout"], 45)
+
+    def test_update_apis_require_admin_session_and_csrf(self) -> None:
+        cookie, csrf = self.setup_admin()
+        self.assertEqual(self.request("GET", "/api/updates/status")[0], 401)
+        status, _, payload = self.request("GET", "/api/updates/status", headers={"Cookie": cookie})
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(json.loads(payload)["channel"], "stable")
+        self.assertEqual(self.request("POST", "/api/updates/check", {}, {"Cookie": cookie})[0], 403)
+
+        cases = [
+            ("/api/updates/check", "start_check", {}),
+            ("/api/updates/channel", "set_channel", {"channel": "beta"}),
+            ("/api/updates/skip", "skip", {"version": "0.3.2"}),
+            ("/api/updates/install", "start_install", {"allow_data_migration": True}),
+            ("/api/updates/rollback", "start_rollback", {}),
+            ("/api/updates/restart", "restart", {}),
+        ]
+        for path, method, body in cases:
+            with self.subTest(path=path), mock.patch.object(
+                self.app.updates, method, return_value={"status": "ok"}
+            ) as action:
+                status, _, payload = self.request(
+                    "POST", path, body, {"Cookie": cookie, "X-CSRF-Token": csrf}
+                )
+                self.assertIn(status, {200, 202}, payload)
+                action.assert_called_once()
 
     def test_model_management_is_authenticated_csrf_protected_and_has_no_path_api(self) -> None:
         cookie, csrf = self.setup_admin()

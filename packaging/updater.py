@@ -7,7 +7,9 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
+import stat
 import tempfile
 import time
 import zipfile
@@ -25,6 +27,7 @@ MANIFEST_URL = "https://github.com/vuisme/mlacstudio/releases/latest/download/ML
 PUBLIC_KEY_PATH = Path(__file__).with_name("keys") / "mlac-update-public.json"
 SHA256_DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
 WEIGHT_SUFFIXES = {".gguf", ".safetensors", ".ckpt", ".pt", ".pth"}
+COMPONENT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class UpdateError(RuntimeError):
@@ -89,6 +92,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
         raise UpdateError("invalid update channel")
     if not isinstance(payload.get("version"), str) or not payload["version"]:
         raise UpdateError("update version is required")
+    version_key(payload["version"])
     components = payload.get("components")
     if not isinstance(components, list) or not components:
         raise UpdateError("update metadata has no components")
@@ -97,13 +101,18 @@ def validate_payload(payload: dict[str, Any]) -> None:
         if not isinstance(component, dict):
             raise UpdateError("invalid component entry")
         component_id = str(component.get("id") or "")
-        if not component_id or component_id in seen:
+        component_key = component_id.casefold()
+        if not COMPONENT_ID_RE.fullmatch(component_id) or component_key in seen:
             raise UpdateError("component ids must be unique")
-        seen.add(component_id)
+        seen.add(component_key)
         if "model" in component_id.lower():
             raise UpdateError("models are not update components")
         if component.get("kind") != "core":
             raise UpdateError(f"invalid component kind: {component_id}")
+        component_version = component.get("version", payload["version"])
+        if not isinstance(component_version, str):
+            raise UpdateError(f"invalid component version: {component_id}")
+        version_key(component_version)
         url = str(component.get("url") or "")
         if not url.startswith("https://github.com/vuisme/mlacstudio/releases/download/"):
             raise UpdateError(f"component URL is not an MLAC Studio GitHub release asset: {component_id}")
@@ -131,19 +140,55 @@ def default_state_root() -> Path:
     return local / "MLACStudio"
 
 
-def read_channel(state_root: Path) -> str:
+def read_settings(state_root: Path) -> dict[str, Any]:
     path = state_root / "update-settings.json"
     try:
-        channel = json.loads(path.read_text(encoding="utf-8")).get("channel", DEFAULT_CHANNEL)
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
-        channel = DEFAULT_CHANNEL
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def write_settings(state_root: Path, settings: dict[str, Any]) -> None:
+    value = dict(settings)
+    channel = value.get("channel", DEFAULT_CHANNEL)
+    if channel not in CHANNELS:
+        raise UpdateError("invalid update channel")
+    value["channel"] = channel
+    _write_json_atomic(state_root / "update-settings.json", value)
+
+
+def read_channel(state_root: Path) -> str:
+    channel = read_settings(state_root).get("channel", DEFAULT_CHANNEL)
     return channel if channel in CHANNELS else DEFAULT_CHANNEL
 
 
 def write_channel(state_root: Path, channel: str) -> None:
     if channel not in CHANNELS:
         raise UpdateError("invalid update channel")
-    _write_json_atomic(state_root / "update-settings.json", {"channel": channel})
+    settings = read_settings(state_root)
+    settings["channel"] = channel
+    settings.pop("skipped_version", None)
+    write_settings(state_root, settings)
+
+
+def load_cached_metadata(
+    state_root: Path,
+    channel: str,
+    *,
+    public_key_path: Path = PUBLIC_KEY_PATH,
+) -> dict[str, Any]:
+    if channel not in CHANNELS:
+        raise UpdateError("invalid update channel")
+    path = state_root / "updates" / f"{channel}.json"
+    try:
+        envelope = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise UpdateError("no valid signed update metadata is cached") from exc
+    payload = verify_envelope(envelope, public_key_path)
+    if payload["channel"] != channel:
+        raise UpdateError("signed metadata channel does not match the requested channel")
+    return payload
 
 
 @dataclass
@@ -194,7 +239,10 @@ def fetch_metadata(
             envelope = json.loads(cache_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as cache_exc:
             raise UpdateError("server returned 304 but no valid signed metadata is cached") from cache_exc
-        return UpdateCheck(verify_envelope(envelope, public_key_path), False, headers.get("If-None-Match"))
+        payload = verify_envelope(envelope, public_key_path)
+        if payload["channel"] != channel:
+            raise UpdateError("signed metadata channel does not match the requested channel")
+        return UpdateCheck(payload, False, headers.get("If-None-Match"))
     except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UpdateError(f"could not check for updates: {exc}") from exc
 
@@ -289,7 +337,10 @@ def _safe_extract(archive: Path, destination: Path) -> None:
             target = (destination / info.filename).resolve()
             if root != target and root not in target.parents:
                 raise UpdateError("component archive contains path traversal")
-            if Path(info.filename).suffix.lower() in WEIGHT_SUFFIXES or "models" in Path(info.filename).parts:
+            archive_path = Path(info.filename)
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise UpdateError("component archive contains a symbolic link")
+            if archive_path.suffix.lower() in WEIGHT_SUFFIXES or "models" in {part.lower() for part in archive_path.parts}:
                 raise UpdateError("component archive contains model weights")
         bundle.extractall(destination)
 
@@ -385,6 +436,7 @@ class ComponentStore:
     def rollback(self) -> dict[str, Any]:
         self.recover()
         state = self.active()
+        prior = json.loads(json.dumps(state))
         rolled = False
         for entry in state.get("components", {}).values():
             previous = entry.get("previous")
@@ -396,7 +448,9 @@ class ComponentStore:
         versions = [entry["active"]["version"] for entry in state["components"].values() if entry.get("active")]
         if versions:
             state["app_version"] = min(versions, key=version_key)
+        _write_json_atomic(self.journal_path, {"prior": prior, "target_version": state.get("app_version")})
         _write_json_atomic(self.active_path, state)
+        self.journal_path.unlink(missing_ok=True)
         return state
 
     def _prune(self, state: dict[str, Any]) -> None:

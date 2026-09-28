@@ -17,6 +17,7 @@
       <button class="btn danger-text" type="button" id="sessionDel">Delete</button>
     </div>
     <div class="row">
+      <button class="btn update-nav" type="button" id="updatesBtn">Updates <span class="update-nav-badge" id="updatesBadge" hidden></span></button>
       <button class="btn model-manage-btn" type="button" id="modelsBtn">Models</button>
       <button class="btn" type="button" id="logout">Log out</button>
     </div>
@@ -217,6 +218,42 @@
   <p class="hint">Packaged and official Hugging Face artifacts always require size and SHA-256 verification. Explicitly acknowledged custom public HTTPS sources may omit either value.</p>
   <p class="errors" id="modelsError" hidden></p>
   <div class="acts"><button class="btn" type="button" id="modelsDone">Done</button><button class="primary" type="button" id="runtimeSave">Save runtime setting</button></div>
+</dialog>
+
+<dialog class="updates-dialog" id="updatesDialog">
+  <div class="updates-head">
+    <div><p class="eyebrow">Signed application releases</p><h3>Updates</h3></div>
+    <button class="iconbtn" type="button" id="updatesClose" aria-label="Close">x</button>
+  </div>
+  <section class="update-hero">
+    <div class="update-version-block"><span>Running now</span><strong id="updateCurrent">-</strong></div>
+    <div class="update-arrow" aria-hidden="true">-&gt;</div>
+    <div class="update-version-block latest"><span>Latest signed release</span><strong id="updateLatest">Checking...</strong></div>
+    <span class="update-state" id="updateState">Starting</span>
+  </section>
+  <section class="update-controls">
+    <label class="field"><span class="label">Release channel</span><select id="updateChannel"><option value="stable">Stable</option><option value="beta">Beta</option><option value="dev">Dev</option></select></label>
+    <button class="btn" type="button" id="updateCheck">Check now</button>
+  </section>
+  <section class="update-release" id="updateRelease" hidden>
+    <div class="update-release-line"><b id="updateReleaseTitle"></b><span id="updateSize"></span></div>
+    <p id="updateChangelog"></p>
+    <p class="update-warning" id="updateMigration" hidden></p>
+  </section>
+  <section class="update-progress" id="updateProgress" hidden>
+    <div class="update-progress-line"><b id="updateStage">Preparing</b><span id="updatePercent">0%</span></div>
+    <progress id="updateProgressBar" max="100" value="0"></progress>
+    <div class="update-progress-line muted"><span id="updateBytes">0 B / 0 B</span><span id="updateComponent"></span></div>
+  </section>
+  <p class="update-boundary">Application updates contain only signed MLAC Studio core files. Models and native model runtimes are managed separately and never auto-update here.</p>
+  <p class="errors" id="updatesError" hidden></p>
+  <div class="update-actions">
+    <button class="btn danger-text" type="button" id="updateRollback" hidden>Rollback</button>
+    <span class="spacer"></span>
+    <button class="btn" type="button" id="updateSkip" hidden>Skip this version</button>
+    <button class="primary" type="button" id="updateInstall" hidden>Download and install</button>
+    <button class="primary restart-btn" type="button" id="updateRestart" hidden>Restart MLAC Studio</button>
+  </div>
 </dialog>
 
 <dialog id="askDialog">

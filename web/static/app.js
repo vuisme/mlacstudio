@@ -16,6 +16,7 @@ const ui = {
   session: "", paths: {}, ratio: null, inputs: [], takes: [], queue: [],
   model: { status: "unloaded", pid: null, backend: "sd-server" }, idleTimeout: 300,
   models: { available: false },
+  updates: { status: "idle", current_version: "-", channel: "stable" },
   sourcePreview: null, sourceDraftInitialized: false,
   selected: null, // gallery item id of the take in the preview
   live: null, // the running job's summary, for the stage bar
@@ -698,6 +699,9 @@ function onEvent(event) {
   } else if (type === "models") {
     ui.models = data;
     renderModels();
+  } else if (type === "updates") {
+    ui.updates = data;
+    renderUpdates();
   }
 }
 
@@ -740,6 +744,73 @@ const formatBytes = (value) => {
   while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
   return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
 };
+
+const UPDATE_BUSY = new Set(["checking", "downloading", "installing", "rolling_back", "restarting"]);
+
+function renderUpdates() {
+  const state = ui.updates || {};
+  const latest = state.latest;
+  const busy = UPDATE_BUSY.has(state.status);
+  const total = Number(state.bytes_total || 0);
+  const done = Number(state.bytes_downloaded || 0);
+  const percent = total > 0 ? Math.min(100, Math.round(done * 100 / total)) : 0;
+  const labels = {
+    idle: "Ready", checking: "Checking", available: "Available", up_to_date: "Up to date",
+    skipped: "Skipped", downloading: "Downloading", installing: "Installing", restart_pending: "Restart ready",
+    rolling_back: "Rolling back", restarting: "Restarting", error: "Error",
+  };
+  $("updateCurrent").textContent = state.current_version || "-";
+  $("updateLatest").textContent = latest?.version || (state.startup_check_pending ? "Checking..." : state.current_version || "-");
+  $("updateChannel").value = state.channel || "stable";
+  $("updateChannel").disabled = busy;
+  $("updateCheck").disabled = busy;
+  $("updateState").textContent = labels[state.status] || state.status || "Ready";
+  $("updateState").className = `update-state${state.status === "error" ? " error" : ["up_to_date", "restart_pending"].includes(state.status) ? " ok" : ""}`;
+  $("updatesBadge").hidden = !["available", "restart_pending", "error"].includes(state.status);
+
+  $("updateRelease").hidden = !latest;
+  if (latest) {
+    $("updateReleaseTitle").textContent = `MLAC Studio ${latest.version} / ${latest.channel}`;
+    $("updateSize").textContent = `${formatBytes(latest.size)} / ${(latest.components || []).join(", ")}`;
+    $("updateChangelog").textContent = latest.changelog || "Signed maintenance release.";
+    $("updateMigration").hidden = !latest.data_migration;
+    $("updateMigration").textContent = latest.data_migration ? `Data migration: ${latest.data_migration}. Back up your data before approving installation.` : "";
+  }
+
+  $("updateProgress").hidden = !(busy || total > 0 || state.status === "restart_pending");
+  $("updateStage").textContent = state.stage || "Ready";
+  $("updatePercent").textContent = total > 0 ? `${percent}%` : busy ? "Working" : "100%";
+  $("updateProgressBar").value = total > 0 ? percent : (state.status === "restart_pending" ? 100 : 0);
+  $("updateBytes").textContent = total > 0 ? `${formatBytes(done)} / ${formatBytes(total)}` : "Signed metadata and core files";
+  $("updateComponent").textContent = state.component || "";
+  showError($("updatesError"), state.error ? new Error(state.error) : null);
+
+  $("updateSkip").hidden = !(latest && state.status === "available" && !latest.security_mandatory);
+  $("updateInstall").hidden = !(latest && ["available", "skipped", "error"].includes(state.status) && !state.restart_required);
+  $("updateInstall").disabled = busy;
+  $("updateRestart").hidden = !state.restart_required;
+  $("updateRestart").disabled = busy || !state.restart_available;
+  $("updateRestart").title = state.restart_available ? "" : "The installed MLAC Studio bootstrap is required";
+  $("updateRollback").hidden = !(state.rollback_version && !state.restart_required);
+  $("updateRollback").textContent = state.rollback_version ? `Rollback to ${state.rollback_version}` : "Rollback";
+  $("updateRollback").disabled = busy;
+}
+
+async function updateAction(path, body = {}) {
+  try {
+    showError($("updatesError"), null);
+    ui.updates = await api(path, body);
+    renderUpdates();
+  } catch (err) {
+    showError($("updatesError"), err);
+  }
+}
+
+async function openUpdates() {
+  try { ui.updates = await api("/api/updates/status"); } catch (err) { showError($("updatesError"), err); }
+  renderUpdates();
+  $("updatesDialog").showModal();
+}
 
 function renderHfSource() {
   const source = ui.models?.catalog?.source;
@@ -1101,6 +1172,33 @@ function wire() {
     }
   });
 
+  $("updatesBtn").addEventListener("click", openUpdates);
+  $("updatesClose").addEventListener("click", () => $("updatesDialog").close());
+  $("updateCheck").addEventListener("click", () => updateAction("/api/updates/check"));
+  $("updateChannel").addEventListener("change", (event) => updateAction("/api/updates/channel", { channel: event.target.value }));
+  $("updateSkip").addEventListener("click", () => updateAction("/api/updates/skip", { version: ui.updates?.latest?.version }));
+  $("updateInstall").addEventListener("click", async () => {
+    const migration = ui.updates?.latest?.data_migration;
+    if (migration) {
+      const approved = await ask({
+        title: "Approve data migration?",
+        message: `Back up MLAC Studio data first. The signed release requests: ${migration}`,
+        ok: "Approve and install",
+      });
+      if (!approved) return;
+    }
+    await updateAction("/api/updates/install", { allow_data_migration: Boolean(migration) });
+  });
+  $("updateRestart").addEventListener("click", () => updateAction("/api/updates/restart"));
+  $("updateRollback").addEventListener("click", async () => {
+    const approved = await ask({
+      title: `Rollback to ${ui.updates?.rollback_version}?`,
+      message: "The previous signed core version will become active after a restart. Models and runtime files are unchanged.",
+      ok: "Prepare rollback",
+    });
+    if (approved) await updateAction("/api/updates/rollback");
+  });
+
   $("termTabs").addEventListener("click", (e) => {
     const tab = e.target.closest("button[data-tab]");
     if (!tab) return;
@@ -1124,9 +1222,11 @@ async function start() {
   renderPaths(cfg.paths);
   ui.model = cfg.model;
   ui.models = cfg.models;
+  ui.updates = cfg.updates;
   ui.idleTimeout = cfg.idle_timeout;
   renderModelStatus();
   renderModels();
+  renderUpdates();
   if (cfg.models?.available && !cfg.models.catalog?.active_profile) openModels();
   ui.session = cfg.active;
   renderSessions(cfg.sessions.includes(cfg.active) ? cfg.sessions : [cfg.active, ...cfg.sessions]);

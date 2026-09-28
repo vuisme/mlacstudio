@@ -36,6 +36,12 @@ from storage import MAX_MASK_BYTES, MAX_UPLOAD_BYTES, Repository, resolve_under
 
 WEB_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WEB_DIR.parent
+PACKAGING_DIR = REPO_ROOT / "packaging"
+if str(PACKAGING_DIR) not in sys.path:
+    sys.path.insert(0, str(PACKAGING_DIR))
+
+from updates import UpdateManager  # noqa: E402
+
 STATIC_DIR = WEB_DIR / "static"
 PUBLIC_FILES = {"/static/auth.css", "/static/auth.js"}
 
@@ -78,6 +84,10 @@ class StudioApp:
         model_manager_path: Path | None = None,
         manager_opener: Callable[..., Any] | None = None,
         hardware: Any | None = None,
+        update_state_root: Path | None = None,
+        update_opener: Callable[..., Any] | None = None,
+        update_public_key_path: Path | None = None,
+        start_update_check: bool = True,
     ) -> None:
         defaults = load_config(config_path)
         configured_data = Path(str(defaults.get("data_dir", config_path.parent / "data")))
@@ -119,11 +129,24 @@ class StudioApp:
                 )
             except Exception as exc:
                 self.model_manager_error = str(exc)
+        update_options: dict[str, Any] = {
+            "can_mutate": self.runner.is_idle,
+            "start_check": start_update_check,
+        }
+        if update_opener is not None:
+            update_options["opener"] = update_opener
+        if update_public_key_path is not None:
+            update_options["public_key_path"] = update_public_key_path
+        self.updates = UpdateManager(update_state_root or config_path.parent, **update_options)
 
     def close(self) -> None:
+        self.updates.close()
         if self.model_manager is not None:
             self.model_manager.close()
         self.runner.stop()
+
+    def set_restart_handler(self, handler: Callable[[], None] | None) -> None:
+        self.updates.set_restart_handler(handler)
 
     def reload_config(self, config: dict[str, Any]) -> None:
         self.runner.unload_model()
@@ -301,6 +324,7 @@ class Handler(BaseHTTPRequestHandler):
                 "settings": self.app.repository.session_settings(self.app.repository.active_session),
                 "model": self.app.runner.model_state(),
                 "models": self.app.models_state(),
+                "updates": self.app.updates.status(),
                 "idle_timeout": self.app.config.idle_timeout,
                 "csrf": auth.csrf if auth else "",
             }, head=head)
@@ -314,6 +338,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.app.runner.queue_state(), head=head)
         if path == "/api/models":
             return self._json(200, self.app.models_state(), head=head)
+        if path == "/api/updates/status":
+            return self._json(200, self.app.updates.status(), head=head)
         if path == "/api/events":
             return self._events(head=head)
         self._json(404, {"error": "not found"}, head=head)
@@ -335,6 +361,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"idle_timeout": timeout, "model": self.app.runner.model_state()})
         if path.startswith("/api/models/"):
             return self._models_post(path, body)
+        if path.startswith("/api/updates/"):
+            return self._updates_post(path, body)
         if path == "/api/session/activate":
             return self._json(200, self.app.repository.activate_session(session_name))
         if path == "/api/session/save":
@@ -401,6 +429,29 @@ class Handler(BaseHTTPRequestHandler):
             raise
         return self._json(200, result)
 
+    def _updates_post(self, path: str, body: dict[str, Any]) -> None:
+        manager = self.app.updates
+        try:
+            if path == "/api/updates/check":
+                result = manager.start_check()
+            elif path == "/api/updates/channel":
+                result = manager.set_channel(str(body.get("channel") or ""))
+            elif path == "/api/updates/skip":
+                result = manager.skip(str(body.get("version") or "") or None)
+            elif path == "/api/updates/install":
+                result = manager.start_install(allow_data_migration=bool(body.get("allow_data_migration", False)))
+            elif path == "/api/updates/rollback":
+                result = manager.start_rollback()
+            elif path == "/api/updates/restart":
+                result = manager.restart()
+            else:
+                return self._json(404, {"error": "not found"})
+        except Exception as exc:
+            if exc.__class__.__name__ in {"UpdateError", "DiskSpaceError", "SignatureError"}:
+                return self._json(409, {"error": str(exc)})
+            raise
+        return self._json(202 if path in {"/api/updates/check", "/api/updates/channel", "/api/updates/install", "/api/updates/rollback"} else 200, result)
+
     def _upload(self) -> None:
         length = self._content_length(MAX_UPLOAD_BYTES)
         original = unquote(self.headers.get("X-Filename", ""))
@@ -450,6 +501,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         subscriber = self.app.runner.subscribe()
         model_subscriber = self.app.model_manager.subscribe() if self.app.model_manager is not None else None
+        update_subscriber = self.app.updates.subscribe()
         try:
             initial = json.dumps({"type": "queue", "data": self.app.runner.queue_state()})
             self.wfile.write(f"data: {initial}\n\n".encode("utf-8"))
@@ -457,6 +509,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"data: {model}\n\n".encode("utf-8"))
             models = json.dumps({"type": "models", "data": self.app.models_state()})
             self.wfile.write(f"data: {models}\n\n".encode("utf-8"))
+            updates = json.dumps({"type": "updates", "data": self.app.updates.status()})
+            self.wfile.write(f"data: {updates}\n\n".encode("utf-8"))
             self.wfile.flush()
             last_ping = time.monotonic()
             while True:
@@ -468,6 +522,9 @@ class Handler(BaseHTTPRequestHandler):
                 if message is None and model_subscriber is not None:
                     with contextlib.suppress(queue.Empty):
                         message = model_subscriber.get_nowait()
+                if message is None:
+                    with contextlib.suppress(queue.Empty):
+                        message = update_subscriber.get_nowait()
                 if message is not None:
                     self.wfile.write(f"data: {message}\n\n".encode("utf-8"))
                     self.wfile.flush()
@@ -482,6 +539,7 @@ class Handler(BaseHTTPRequestHandler):
             self.app.runner.unsubscribe(subscriber)
             if model_subscriber is not None:
                 self.app.model_manager.unsubscribe(model_subscriber)
+            self.app.updates.unsubscribe(update_subscriber)
 
     def _json_body(self) -> dict[str, Any]:
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
