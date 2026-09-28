@@ -1718,9 +1718,21 @@ class PersistentModelManager:
             recommended = select_profile(self.manifest, "auto", self.hardware)
         active_profile = self.registry.get("active_profile")
         active_record = installed_registry.get(active_profile, {}) if active_profile in installed_registry else {}
+        hardware_warnings: list[str] = []
+        if not self.hardware.windows_x64:
+            hardware_warnings.append("This build is intended for 64-bit Windows; installation is allowed but may not run.")
+        if not self.hardware.gpu_name:
+            hardware_warnings.append("No NVIDIA GPU was detected; installation is allowed but inference may fail or be very slow.")
+        if self.hardware.cuda12_driver_compatible is False:
+            hardware_warnings.append(
+                f"NVIDIA driver {self.hardware.driver_version} is older than the recommended CUDA 12 driver; installation is allowed at your own risk."
+            )
+        if recommended is None:
+            hardware_warnings.append("This machine is below all recommended model profiles; you may still choose and install any profile.")
         return {
             "release_version": self.manifest["release_version"],
             "hardware": asdict(self.hardware),
+            "hardware_warnings": hardware_warnings,
             "recommended_profile": recommended,
             "active_profile": self.registry.get("active_profile"),
             "active_model": {
@@ -1760,8 +1772,6 @@ class PersistentModelManager:
     def start_install(self, profile_id: str, *, accepted: Any, activate: bool = True) -> dict[str, Any]:
         if profile_id not in self.manifest["profiles"]:
             raise ManagerError("unknown profile")
-        if not self._compatible(self.manifest["profiles"][profile_id]):
-            raise ManagerError("profile is not compatible with the detected Windows/NVIDIA hardware")
         if activate and not self.can_mutate():
             raise ManagerError("cannot switch models while a render is active or queued")
         newly_accepted = self._validate_acceptance(profile_id, accepted)
@@ -2007,8 +2017,6 @@ class PersistentModelManager:
             or not self._profile_installed(profile_id)
         ):
             raise ManagerError("profile is not installed")
-        if not self._compatible(self.manifest["profiles"][profile_id]):
-            raise ManagerError("profile is not compatible with the detected Windows/NVIDIA hardware")
         installed: dict[str, Path] = {}
         for artifact in _selected_artifacts(self.manifest, profile_id):
             root = self.model_dir if artifact["root"] == "models" else self.runtime_dir
@@ -2122,12 +2130,6 @@ def main(argv: Iterable[str] | None = None) -> int:
             return 0
         hardware = detect_hardware(args.model_dir)
         profile_id = select_profile(manifest, args.profile, hardware)
-        if not hardware.windows_x64:
-            raise ManagerError("this release requires 64-bit Windows")
-        if not hardware.gpu_name:
-            raise ManagerError("this release requires an NVIDIA GPU detected by nvidia-smi")
-        if hardware.cuda12_driver_compatible is False:
-            raise ManagerError(f"NVIDIA driver {hardware.driver_version} is too old for the CUDA 12 runtime")
         install_profile(
             manifest,
             profile_id,

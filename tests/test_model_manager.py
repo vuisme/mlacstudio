@@ -744,7 +744,7 @@ class PersistentManagerTests(unittest.TestCase):
             config_path=root / "state" / "config.json",
             data_dir=root / "state" / "data",
             opener=MappingOpener(payloads),
-            hardware=self.hardware(),
+            hardware=kwargs.pop("hardware", self.hardware()),
             **kwargs,
         )
 
@@ -837,6 +837,29 @@ class PersistentManagerTests(unittest.TestCase):
             service.test_token()
         self.assertNotIn("hf_private_value", str(caught.exception))
         self.assertIn("REDACTED", str(caught.exception))
+        service.close()
+
+    def test_low_spec_hardware_warns_but_does_not_block_install(self) -> None:
+        contents = {
+            "sd-cli": b"cli", "sd-server": b"server", "transformer": b"transformer",
+            "text": b"text", "mmproj": b"projector", "vae": b"vae",
+        }
+        manifest = manager.validate_manifest(valid_manifest(contents))
+        payloads = {item["url"]: contents[item["id"]] for item in manifest["artifacts"] if item["delivery"] == "download"}
+        root = self.runtime_dir()
+        low_spec = manager.HardwareInfo(True, None, 2048, "500.0", False, 4096, 100000)
+        service = self.create_manager(root, manifest, payloads, artifact_contents=contents, hardware=low_spec)
+        catalog = service.catalog()
+        self.assertIsNone(catalog["recommended_profile"])
+        self.assertTrue(catalog["hardware_warnings"])
+        self.assertTrue(all(not profile["compatible"] for profile in catalog["profiles"]))
+        license_info = catalog["profiles"][1]["licenses"][0]
+        service.start_install(
+            "medium",
+            accepted=[{"id": license_info["id"], "version": license_info["version"], "model": license_info["model"]}],
+        )
+        self.wait_for(service)
+        self.assertEqual(service.status()["transfer"]["status"], "completed")
         service.close()
 
     def test_async_install_persists_progress_license_and_active_config(self) -> None:

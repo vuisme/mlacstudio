@@ -919,7 +919,9 @@ function renderModels() {
   const hw = catalog.hardware || {};
   $("hardwareSummary").textContent = hw.gpu_name
     ? `${hw.gpu_name} / ${formatBytes((hw.vram_mib || 0) * 1024 * 1024)} VRAM / driver ${hw.driver_version || "unknown"}`
-    : "No supported NVIDIA GPU was detected. Downloads remain disabled until compatible hardware is available.";
+    : "No supported NVIDIA GPU was detected. Installation remains available, but inference may fail or be very slow.";
+  const warnings = catalog.hardware_warnings || [];
+  if (warnings.length) $("hardwareSummary").textContent += ` Warning: ${warnings.join(" ")}`;
   const busy = ["queued", "downloading", "verifying", "configuring", "cancelling"].includes(transfer.status);
   const activeProfile = (catalog.profiles || []).find((profile) => profile.active);
   $("modelTrustWarning").hidden = !catalog.active_model?.unverified;
