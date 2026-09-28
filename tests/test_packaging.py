@@ -22,6 +22,11 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("VerifyEnvelope", source)
         self.assertIn("AddRange", source)
         self.assertIn("activation-journal.json", source)
+        self.assertIn("ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12", source)
+        self.assertLess(
+            source.index("ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12"),
+            source.index("DownloadText(manifestUrl)"),
+        )
 
     def test_core_bundle_excludes_native_runtime_and_embeds_update_policy(self) -> None:
         spec = (ROOT / "packaging" / "mlac-studio.spec").read_text(encoding="utf-8")

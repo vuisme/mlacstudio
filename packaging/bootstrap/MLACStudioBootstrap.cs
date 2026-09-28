@@ -76,6 +76,10 @@ namespace MLACStudioBootstrap
         [STAThread]
         private static int Main(string[] args)
         {
+            // .NET Framework may otherwise inherit legacy TLS defaults on older Windows installs.
+            // GitHub and its release CDN require TLS 1.2 or newer.
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            ServicePointManager.Expect100Continue = false;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             try
@@ -137,7 +141,9 @@ namespace MLACStudioBootstrap
             catch (Exception ex)
             {
                 if (window != null) window.Close();
-                MessageBox.Show(ex.Message, "MLAC Studio Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string detail = ex.Message;
+                if (ex.InnerException != null) detail += "\n\nDetails: " + ex.InnerException.Message;
+                MessageBox.Show(detail, "MLAC Studio Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }
