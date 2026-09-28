@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 import time
 import zipfile
@@ -20,7 +21,22 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "0.3.2"
+def _installed_version() -> str:
+    """Read build-generated version metadata, with a source-tree fallback for development."""
+    candidates = [Path(__file__).resolve().parent / "version.json"]
+    if getattr(sys, "frozen", False):
+        candidates.insert(0, Path(sys.executable).resolve().parent / "version.json")
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate.read_text(encoding="utf-8")).get("version")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        except (OSError, ValueError, AttributeError):
+            pass
+    return os.environ.get("MLAC_APP_VERSION", "0.0.0-dev")
+
+
+APP_VERSION = _installed_version()
 CHANNELS = {"stable", "beta", "dev"}
 DEFAULT_CHANNEL = "stable"
 MANIFEST_URL = "https://github.com/vuisme/mlacstudio/releases/latest/download/MLAC-Studio-{channel}.json"

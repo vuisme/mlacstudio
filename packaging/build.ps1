@@ -46,12 +46,16 @@ if ($LASTEXITCODE -ne 0) { throw "Generated model manifest failed validation." }
 & $Python (Join-Path $PSScriptRoot "validate-release-sources.py") --manifest $modelManifest
 if ($LASTEXITCODE -ne 0) { throw "Generated model manifest failed remote validation." }
 
+$versionMetadata = Join-Path $releaseRoot "version.json"
+@{ version = $Version } | ConvertTo-Json -Compress | Set-Content -LiteralPath $versionMetadata -Encoding utf8
 $env:MLAC_MODEL_MANIFEST = (Resolve-Path -LiteralPath $modelManifest).Path
+$env:MLAC_VERSION_METADATA = (Resolve-Path -LiteralPath $versionMetadata).Path
 try {
     & $Python -m PyInstaller --noconfirm --clean (Join-Path $PSScriptRoot "mlac-studio.spec")
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller core build failed." }
 } finally {
     Remove-Item Env:MLAC_MODEL_MANIFEST -ErrorAction SilentlyContinue
+    Remove-Item Env:MLAC_VERSION_METADATA -ErrorAction SilentlyContinue
 }
 
 $bundle = Join-Path $projectRoot "dist\MLACStudio"

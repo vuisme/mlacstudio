@@ -43,6 +43,12 @@ class Response:
 
 
 class UpdateTests(unittest.TestCase):
+    def test_installed_version_comes_from_build_metadata_or_development_fallback(self) -> None:
+        source = (ROOT / "packaging" / "updater.py").read_text(encoding="utf-8")
+        self.assertIn('Path(sys.executable).resolve().parent / "version.json"', source)
+        self.assertIn('os.environ.get("MLAC_APP_VERSION", "0.0.0-dev")', source)
+        self.assertNotRegex(source, r'APP_VERSION\s*=\s*"\d+\.\d+\.\d+"')
+
     def root(self) -> Path:
         path = ROOT / "tests" / "runtime" / uuid.uuid4().hex
         path.mkdir(parents=True, exist_ok=True)

@@ -8,8 +8,11 @@ from PyInstaller.utils.hooks import collect_submodules
 packaging_dir = Path(SPECPATH)
 project_root = packaging_dir.parent
 release_manifest = Path(os.environ["MLAC_MODEL_MANIFEST"]).resolve()
+version_metadata = Path(os.environ["MLAC_VERSION_METADATA"]).resolve()
 if not release_manifest.is_file():
     raise SystemExit(f"MLAC_MODEL_MANIFEST is not a file: {release_manifest}")
+if not version_metadata.is_file():
+    raise SystemExit(f"MLAC_VERSION_METADATA is not a file: {version_metadata}")
 
 common_datas = [
     (str(project_root / "web" / "static"), "web/static"),
@@ -21,6 +24,7 @@ common_datas = [
     (str(packaging_dir / "updater.py"), "."),
     (str(packaging_dir / "keys" / "mlac-update-public.json"), "keys"),
     (str(release_manifest), "."),
+    (str(version_metadata), "."),
 ]
 
 app_analysis = Analysis(
