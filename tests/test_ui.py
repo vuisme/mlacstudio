@@ -38,6 +38,15 @@ class MaskUiTests(unittest.TestCase):
         self.assertIn("transfer.indeterminate", script)
         self.assertIn("responsibility_acknowledged", script)
 
+    def test_incompatible_profiles_warn_without_disabling_install(self) -> None:
+        script = (ROOT / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('!profile.compatible ? el("span", { class: "chip warning", text: "Not compatible" }) : null', script)
+        self.assertNotIn("disabled: busy || !profile.compatible", script)
+        self.assertRegex(
+            script,
+            r'(?s)text: profile\.download_bytes.*?disabled: busy,.*?modelAction\("/api/models/install"',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -953,7 +953,7 @@ function renderModels() {
     if (!profile.installed) {
       actions.append(el("button", {
         class: "primary", type: "button", text: profile.download_bytes == null ? "Install (size unknown)" : `Install ${formatBytes(profile.download_bytes)}`,
-        disabled: busy || !profile.compatible,
+        disabled: busy,
         onclick: async () => {
           const accepted = [...licenses.querySelectorAll(".license-check:checked")].map((node) => ({
             id: node.dataset.id, version: node.dataset.version, model: node.dataset.model,
