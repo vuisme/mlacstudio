@@ -27,6 +27,16 @@ class PackagingContractTests(unittest.TestCase):
             source.index("ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12"),
             source.index("DownloadText(manifestUrl)"),
         )
+        public_key = json.loads((ROOT / "packaging" / "keys" / "mlac-update-public.json").read_text(encoding="utf-8"))
+        expected_xml = (
+            "<RSAKeyValue><Modulus>"
+            + public_key["modulus"]
+            + "</Modulus><Exponent>"
+            + public_key["exponent"]
+            + "</Exponent></RSAKeyValue>"
+        )
+        self.assertIn(f'private const string KeyId = "{public_key["key_id"]}";', source)
+        self.assertIn(f'private const string PublicKeyXml = "{expected_xml}";', source)
 
     def test_core_bundle_excludes_native_runtime_and_embeds_update_policy(self) -> None:
         spec = (ROOT / "packaging" / "mlac-studio.spec").read_text(encoding="utf-8")

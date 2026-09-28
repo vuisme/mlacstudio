@@ -68,8 +68,8 @@ namespace MLACStudioBootstrap
     internal static class Program
     {
         private const string Version = "0.3.0";
-        private const string KeyId = "mlac-release-2026-01";
-        private const string PublicKeyXml = "<RSAKeyValue><Modulus>zeZbJnjO02luXHUF2vbwpXccSUdYZ8Kaqa7z9HkkdueKNvna1JAOvpXsFWY5XFt15V7+eHadFQQZvOiJ1uiNMGukHsyO2uO4NLcRONL8VHKseIY5ECKZnnWJVKUtiPbLewg1sVNHw+AyWYGU2ZmOcCe7UDOjo+1vg/wzQveUcaneJLK2Ps3yWQPS1YvPms7Fj2a/H+X7wfPVO3HtlbbDv/1r4CqjSJnEnjcthQjGUN08fTbT56Y3VoJCagqyKZRTcA9gICz+1QZYjRsuQww5eeyajs2SRfwcS07pWdjcJl05DLd+RDzowf2h7Ep2DmtyCWfpUE5YOEOT6yDQkTIzJn133pyGZef6jB7sk3vcFYTZfW1DThkkdyoIFD06xfzTJKl/UDOOREN+BGfjTaLEQTcZpq5xyJBXldA6tTsFGuZAZhcrdGnPvvfOXGhz6ICceoSAqhE/aGuYZIC/9FoXIy5O8RAx0/xWv9u2Nb0VYrIPQbxUcTQYqk9xndSxwXkR</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+        private const string KeyId = "mlac-release-2026-02";
+        private const string PublicKeyXml = "<RSAKeyValue><Modulus>yiybfosM1kd//o4IAiqRyX5l0atQX7FBVrzWyE0TPl2S4/0qhtXTn9rE1coWI4SrB1yCXyHQtz7C13LlHRGQK7aqA3YavznoZBOflE1UainIRoOOKe568Eiw5vdjqWJE2oDVhNixk091zVmfqX9dI/PkDLPpPNpHvgN3I/FsDwJAodQln7KsprZQqfFU4+g5ycQd4bL4nFKD5sxCwUbBgG6Bf5HY3lsolkVf2chycH/uWzM7791VwJr1pCS8frJRmf3U0mdlzEzeaW87s54oqs4fG0K4sDOQ9ZcYCVjMHHN2odDRsg2L1BnCJEc9VAG3OSCQgnnSMQFQzmOCUnr5qofd5Ua7t57/O59k3whLKt1nzxtITH1mEp4AxWUxzt6BVIt0safREyd3++KGRIsBJujuNQpZL5EL+4utiFv8VkHJDmErSq/K8gmsDW+aqCB6wToGPsYnTispT6fjXVrS+Af+RCE2em0ObHeN13puGUxCbNwYMXsAsS7AsciwZ4D5</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         private static ProgressWindow window;
 
