@@ -19,6 +19,7 @@ class MaskUiTests(unittest.TestCase):
             "sourcePanel", "hfRepo", "hfRevision", "hfSourceFiles", "hfSourceResolve",
             "hfSourceConfirm", "hfSourceReset", "hfToken", "hfTokenSet", "hfTokenTest", "hfTokenRemove",
             "customSourceAck", "sourceTrustWarning", "downloadTrustWarning", "modelTrustWarning",
+            "preset", "rgbaWarning", "refs", "fileInput",
         ):
             self.assertIn(f'id="{ident}"', html)
         self.assertIn('addEventListener("pointerdown"', script)
@@ -37,6 +38,11 @@ class MaskUiTests(unittest.TestCase):
         self.assertIn('profile.unverified ? el("span"', script)
         self.assertIn("transfer.indeterminate", script)
         self.assertIn("responsibility_acknowledged", script)
+        self.assertIn('api("/api/references/reorder"', script)
+        self.assertIn('api("/api/references/role"', script)
+        self.assertIn('api("/api/references/remove"', script)
+        self.assertIn('q("/api/references/add")', script)
+        self.assertIn("RGBA output support has not been reported", script)
 
     def test_incompatible_profiles_warn_without_disabling_install(self) -> None:
         script = (ROOT / "web" / "static" / "app.js").read_text(encoding="utf-8")

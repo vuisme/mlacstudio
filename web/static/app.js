@@ -10,6 +10,14 @@ const RATIOS = {
 };
 const STAGES = [["load", "Load"], ["denoise", "Denoise"], ["decode", "Decode"], ["save", "Save"]];
 const FIELDS = ["prompt", "width", "height", "steps", "seed"];
+const ROLE_LABELS = {
+  base: "Base / edit", subject: "Subject", style: "Style", composition: "Composition",
+  identity: "Identity", background: "Background", reference: "Reference",
+};
+const PRESET_PROMPTS = {
+  transparent: "Create an image with a transparent background. Keep the subject opaque with clean alpha edges and no backdrop.",
+  "subject-extraction": "Extract the main subject from the base image onto a transparent background with clean alpha edges. Preserve identity, detail, and color.",
+};
 let csrfToken = "";
 
 const ui = {
@@ -21,6 +29,8 @@ const ui = {
   selected: null, // gallery item id of the take in the preview
   live: null, // the running job's summary, for the stage bar
   maskInfo: null,
+  capabilities: { multi_reference: true, max_references: 10, rgba: false, rgba_reported: false },
+  referenceRoles: Object.keys(ROLE_LABELS),
 };
 
 const maskState = {
@@ -96,7 +106,7 @@ function settings() {
   const num = (id) => ($(id).value === "" ? null : Number($(id).value));
   return {
     prompt: $("prompt").value, ratio: ui.ratio, width: num("width"), height: num("height"),
-    steps: num("steps") ?? 20, seed: num("seed") ?? 42,
+    steps: num("steps") ?? 20, seed: num("seed") ?? 42, preset: $("preset").value,
   };
 }
 
@@ -106,6 +116,7 @@ function applySettings(s) {
   $("height").value = s.height ?? "";
   $("steps").value = s.steps ?? 20;
   $("seed").value = s.seed ?? 42;
+  $("preset").value = s.preset ?? "none";
   ui.ratio = s.ratio || null;
   update();
 }
@@ -119,12 +130,11 @@ function plannedSize() {
     base = RATIOS[s.ratio];
     source = "chosen";
   } else if (ui.inputs.length) {
-    // pipeline_qwenimage21: output_resolution² at the last image's aspect, snapped to 32
-    const last = ui.inputs[ui.inputs.length - 1];
-    const r = (last.width || 1) / (last.height || 1);
+    const baseInput = ui.inputs.find((input) => input.role === "base") || ui.inputs[0];
+    const r = (baseInput.width || 1) / (baseInput.height || 1);
     const w = Math.sqrt(1024 * 1024 * r);
     base = [snap32(w), snap32(w / r)];
-    source = "follows the last image";
+    source = "follows the base image";
   } else {
     base = RATIOS["1:1"];
     source = "default 1:1";
@@ -137,9 +147,17 @@ function plannedSize() {
 function update() {
   const edit = ui.inputs.length > 0;
   for (const span of $("modeSeg").children) span.classList.toggle("on", (span.dataset.m === "i2i") === edit);
-  $("modeSeg").lastElementChild.textContent = edit ? "Edit · 1 image" : "Edit";
+  $("modeSeg").lastElementChild.textContent = edit ? `Edit · ${ui.inputs.length} image${ui.inputs.length === 1 ? "" : "s"}` : "Edit";
   $("promptCount").textContent = `${$("prompt").value.length} chars`;
-  $("refCount").textContent = `${ui.inputs.length}/1`;
+  const maxRefs = Math.min(10, Number(ui.capabilities.max_references || 1));
+  $("refCount").textContent = `${ui.inputs.length}/${maxRefs}`;
+  $("fileInput").disabled = ui.inputs.length >= maxRefs;
+  $("drop").classList.toggle("disabled", ui.inputs.length >= maxRefs);
+  const alphaPreset = $("preset").value !== "none";
+  $("rgbaWarning").hidden = !alphaPreset || ui.capabilities.rgba;
+  $("rgbaWarning").textContent = ui.capabilities.rgba_reported
+    ? "The active backend reports no RGBA output support. This preset can request transparency, but the saved PNG may be opaque."
+    : "RGBA output support has not been reported by the backend. This preset can request transparency, but alpha is not guaranteed.";
 
   const { w, h, source } = plannedSize();
   $("ratioSrc").textContent = ui.ratio ? "chosen" : `auto · ${source}`;
@@ -172,7 +190,7 @@ function renderCommand() {
   const tagged = resolveMentions(s.prompt);
   const p = tagged.length > 40 ? `${tagged.slice(0, 40)}…` : tagged;
   const parts = [`<span class="k">sd-cli</span> --prompt ${escapeHtml(quote(p || "…"))}`];
-  if (ui.inputs.length) parts.push(`--ref-image ${escapeHtml(ui.inputs[0].name)}`);
+  for (const input of ui.inputs) parts.push(`--ref-image ${escapeHtml(input.name)}`);
   if (ui.maskInfo) parts.push("--mask mask.png");
   const planned = plannedSize();
   if (planned.w) parts.push(`--width ${planned.w}`);
@@ -262,25 +280,50 @@ function onMentionKey(e) {
 }
 
 function renderRefs() {
-  const followLast = !ui.ratio;
-  const cells = ui.inputs.map((input, i) => el("div", {
-    class: `ref${followLast && i === ui.inputs.length - 1 ? " follow" : ""}`,
-    title: `${input.original_name} · ${input.width}×${input.height}`,
-  },
-  el("img", { src: input.thumb, alt: input.original_name, loading: "lazy", title: `Click to add @${input.name} to the prompt`, onclick: () => insertMention(input.name) }),
-  el("span", { class: "n", text: String(i + 1) }),
-  el("button", {
-    class: "x", type: "button", "aria-label": `Remove ${input.original_name}`, text: "✕",
-    onclick: async () => {
-      await saveMaskNow();
-      await api("/api/inputs/delete", { session: ui.session, name: input.name });
-      loadInputs();
+  $("refs").replaceChildren(...ui.inputs.map((input, index) => {
+    const roleSelect = el("select", {
+      "aria-label": `Role for ${input.original_name}`,
+      onchange: async (event) => {
+        await saveMaskNow();
+        try {
+          await api("/api/references/role", { session: ui.session, id: input.id, role: event.target.value });
+        } finally {
+          loadInputs();
+        }
+      },
+    }, ...ui.referenceRoles.map((role) => el("option", {
+      value: role, text: ROLE_LABELS[role] || role,
+      selected: role === input.role,
+      disabled: input.role === "base" && role !== "base",
+    })));
+    return el("div", {
+      class: `ref${input.role === "base" ? " base" : ""}`,
+      title: `${input.original_name} · ${input.width}×${input.height}${input.has_alpha ? " · alpha" : ""}`,
     },
-  })));
-  for (let i = ui.inputs.length; i < 1; i++) {
-    cells.push(el("div", { class: "ref empty", "aria-hidden": "true" }));
-  }
-  $("refs").replaceChildren(...cells);
+    el("img", { src: input.thumb, alt: input.original_name, loading: "lazy", title: `Add @${input.name} to the prompt`, onclick: () => insertMention(input.name) }),
+    el("span", { class: "ref-meta" },
+      el("b", { text: `${index + 1}. ${input.name}` }),
+      el("small", { text: `${input.width}x${input.height}${input.has_alpha ? " · RGBA" : ""}` })),
+    roleSelect,
+    el("span", { class: "ref-actions" },
+      el("button", { type: "button", text: "^", title: "Move up", disabled: index === 0, onclick: () => moveReference(index, -1) }),
+      el("button", { type: "button", text: "v", title: "Move down", disabled: index === ui.inputs.length - 1, onclick: () => moveReference(index, 1) }),
+      el("button", {
+        type: "button", text: "x", title: `Remove ${input.original_name}`,
+        onclick: async () => {
+          await saveMaskNow();
+          await api("/api/references/remove", { session: ui.session, id: input.id });
+          loadInputs();
+        },
+      })));
+  }));
+}
+
+async function moveReference(index, offset) {
+  const ordered = ui.inputs.map((input) => input.id);
+  [ordered[index], ordered[index + offset]] = [ordered[index + offset], ordered[index]];
+  ui.inputs = await api("/api/references/reorder", { session: ui.session, ordered_ids: ordered });
+  update();
 }
 
 function setMaskTool(tool) {
@@ -457,7 +500,7 @@ async function drawStoredMask(url, token) {
 }
 
 async function loadMaskEditor() {
-  const input = ui.inputs[0];
+  const input = ui.inputs.find((item) => item.role === "base");
   const token = ++maskState.loadToken;
   clearTimeout(maskState.saveTimer);
   maskState.undo.length = 0;
@@ -508,8 +551,13 @@ async function loadInputs() {
 
 async function uploadFiles(files) {
   await saveMaskNow();
-  for (const file of files) {
-    const res = await fetch(q("/api/upload"), {
+  const available = Math.max(0, Math.min(10, Number(ui.capabilities.max_references || 1)) - ui.inputs.length);
+  if (!available) {
+    termLine("[studio] The active backend reference limit has been reached.", "e");
+    return;
+  }
+  for (const file of files.slice(0, available)) {
+    const res = await fetch(q("/api/references/add"), {
       method: "POST", headers: { "X-Filename": encodeURIComponent(file.name), "X-CSRF-Token": csrfToken }, body: file,
     });
     const data = await res.json().catch(() => ({}));
@@ -695,7 +743,9 @@ function onEvent(event) {
     loadInputs();
   } else if (type === "model") {
     ui.model = data;
+    if (data.capabilities) ui.capabilities = data.capabilities;
     renderModelStatus();
+    update();
   } else if (type === "models") {
     ui.models = data;
     renderModels();
@@ -1024,6 +1074,15 @@ function openModels() {
   $("modelsDialog").showModal();
 }
 
+function applyPreset() {
+  const preset = $("preset").value;
+  if (PRESET_PROMPTS[preset] && !$("prompt").value.trim()) {
+    $("prompt").value = PRESET_PROMPTS[preset];
+  }
+  update();
+  saveSoon();
+}
+
 // ── wiring ──────────────────────────────────────────────────────────────
 function wire() {
   for (const id of FIELDS) $(id).addEventListener("input", () => { update(); saveSoon(); });
@@ -1031,6 +1090,7 @@ function wire() {
   $("prompt").addEventListener("keydown", onMentionKey);
   $("prompt").addEventListener("click", renderMentions);
   $("prompt").addEventListener("blur", () => { $("mentions").hidden = true; });
+  $("preset").addEventListener("change", applyPreset);
   $("dice").addEventListener("click", () => { $("seed").value = Math.floor(Math.random() * 2 ** 31); update(); saveSoon(); });
   $("generate").addEventListener("click", async () => {
     showError($("formError"), null);
@@ -1223,6 +1283,8 @@ async function start() {
   wire();
   renderPaths(cfg.paths);
   ui.model = cfg.model;
+  ui.capabilities = cfg.capabilities || cfg.model?.capabilities || ui.capabilities;
+  ui.referenceRoles = cfg.reference_roles || ui.referenceRoles;
   ui.models = cfg.models;
   ui.updates = cfg.updates;
   ui.idleTimeout = cfg.idle_timeout;

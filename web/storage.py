@@ -19,8 +19,11 @@ from PIL import Image, ImageChops, UnidentifiedImageError
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_SESSION_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_REFERENCES = 10
 MAX_MASK_BYTES = 25 * 1024 * 1024
 MAX_MASK_PIXELS = 16 * 1024 * 1024
+REFERENCE_ROLES = ("base", "subject", "style", "composition", "identity", "background", "reference")
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -94,9 +97,11 @@ class Repository:
             name TEXT PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS inputs (
-            id TEXT PRIMARY KEY, session_name TEXT NOT NULL UNIQUE REFERENCES sessions(name) ON DELETE CASCADE,
+            id TEXT PRIMARY KEY, session_name TEXT NOT NULL REFERENCES sessions(name) ON DELETE CASCADE,
             stored_name TEXT NOT NULL, original_name TEXT NOT NULL, width INTEGER NOT NULL,
-            height INTEGER NOT NULL, relative_path TEXT NOT NULL, created_at TEXT NOT NULL
+            height INTEGER NOT NULL, relative_path TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'base',
+            position INTEGER NOT NULL DEFAULT 0, size_bytes INTEGER NOT NULL DEFAULT 0,
+            has_alpha INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS masks (
             id TEXT PRIMARY KEY, session_name TEXT NOT NULL UNIQUE REFERENCES sessions(name) ON DELETE CASCADE,
@@ -118,7 +123,11 @@ class Repository:
         );
         """
         with self.connect() as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
             conn.executescript(schema)
+            self._migrate_inputs(conn)
+            conn.execute("CREATE INDEX IF NOT EXISTS inputs_session_position ON inputs(session_name, position)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS inputs_one_base ON inputs(session_name) WHERE role = 'base'")
             columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(jobs)")}
             if "mask_path" not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN mask_path TEXT")
@@ -132,6 +141,61 @@ class Repository:
                 "finished_at = ? WHERE status IN ('queued', 'running', 'cancelling')",
                 (now_iso(),),
             )
+            self._backfill_input_metadata(conn)
+            conn.execute("PRAGMA foreign_keys = ON")
+
+    def _migrate_inputs(self, conn: sqlite3.Connection) -> None:
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(inputs)")}
+        if {"role", "position", "size_bytes", "has_alpha"}.issubset(columns):
+            return
+        conn.executescript(
+            """
+            DROP INDEX IF EXISTS inputs_session_position;
+            DROP INDEX IF EXISTS inputs_one_base;
+            ALTER TABLE masks RENAME TO masks_legacy;
+            ALTER TABLE inputs RENAME TO inputs_legacy;
+            CREATE TABLE inputs (
+                id TEXT PRIMARY KEY, session_name TEXT NOT NULL REFERENCES sessions(name) ON DELETE CASCADE,
+                stored_name TEXT NOT NULL, original_name TEXT NOT NULL, width INTEGER NOT NULL,
+                height INTEGER NOT NULL, relative_path TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'base',
+                position INTEGER NOT NULL DEFAULT 0, size_bytes INTEGER NOT NULL DEFAULT 0,
+                has_alpha INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+            );
+            INSERT INTO inputs(
+                id, session_name, stored_name, original_name, width, height, relative_path,
+                role, position, size_bytes, has_alpha, created_at
+            )
+            SELECT id, session_name, stored_name, original_name, width, height, relative_path,
+                   'base', 0, 0, 0, created_at
+            FROM inputs_legacy;
+            CREATE TABLE masks (
+                id TEXT PRIMARY KEY, session_name TEXT NOT NULL UNIQUE REFERENCES sessions(name) ON DELETE CASCADE,
+                input_id TEXT NOT NULL REFERENCES inputs(id) ON DELETE CASCADE,
+                relative_path TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+                feather INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+            );
+            INSERT INTO masks SELECT * FROM masks_legacy;
+            DROP TABLE masks_legacy;
+            DROP TABLE inputs_legacy;
+            CREATE INDEX inputs_session_position ON inputs(session_name, position);
+            CREATE UNIQUE INDEX inputs_one_base ON inputs(session_name) WHERE role = 'base';
+            """
+        )
+
+    def _backfill_input_metadata(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute("SELECT id, relative_path, size_bytes FROM inputs").fetchall()
+        for row in rows:
+            try:
+                path = resolve_under(self.upload_dir, str(row["relative_path"]))
+                size = path.stat().st_size
+                _, _, has_alpha = image_metadata(path)
+            except (OSError, ValueError):
+                continue
+            if int(row["size_bytes"] or 0) != size:
+                conn.execute(
+                    "UPDATE inputs SET size_bytes = ?, has_alpha = ? WHERE id = ?",
+                    (size, int(has_alpha), row["id"]),
+                )
 
     def get_config(self, key: str, default: str = "") -> str:
         with self.connect() as conn:
@@ -192,28 +256,34 @@ class Repository:
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError("a session with that name already exists") from exc
-            input_row = conn.execute("SELECT * FROM inputs WHERE session_name = ?", (source,)).fetchone()
-            if input_row:
+            input_rows = conn.execute(
+                "SELECT * FROM inputs WHERE session_name = ? ORDER BY position, created_at", (source,)
+            ).fetchall()
+            copied_ids: dict[str, str] = {}
+            for input_row in input_rows:
                 source_path = resolve_under(self.upload_dir, str(input_row["relative_path"]))
                 input_id = uuid.uuid4().hex
+                copied_ids[str(input_row["id"])] = input_id
                 target_name = f"{input_id}{source_path.suffix.lower()}"
                 shutil.copy2(source_path, self.upload_dir / target_name)
                 conn.execute(
-                    "INSERT INTO inputs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO inputs(id, session_name, stored_name, original_name, width, height, relative_path, "
+                    "role, position, size_bytes, has_alpha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (input_id, new_name, input_row["stored_name"], input_row["original_name"],
-                     input_row["width"], input_row["height"], target_name, now_iso()),
+                     input_row["width"], input_row["height"], target_name, input_row["role"],
+                     input_row["position"], input_row["size_bytes"], input_row["has_alpha"], now_iso()),
                 )
-                mask_row = conn.execute("SELECT * FROM masks WHERE session_name = ?", (source,)).fetchone()
-                if mask_row:
-                    mask_source = resolve_under(self.mask_dir, str(mask_row["relative_path"]))
-                    mask_id = uuid.uuid4().hex
-                    mask_name = f"{mask_id}.png"
-                    shutil.copy2(mask_source, self.mask_dir / mask_name)
-                    conn.execute(
-                        "INSERT INTO masks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (mask_id, new_name, input_id, mask_name, mask_row["width"], mask_row["height"],
-                         mask_row["feather"], now_iso()),
-                    )
+            mask_row = conn.execute("SELECT * FROM masks WHERE session_name = ?", (source,)).fetchone()
+            if mask_row and str(mask_row["input_id"]) in copied_ids:
+                mask_source = resolve_under(self.mask_dir, str(mask_row["relative_path"]))
+                mask_id = uuid.uuid4().hex
+                mask_name = f"{mask_id}.png"
+                shutil.copy2(mask_source, self.mask_dir / mask_name)
+                conn.execute(
+                    "INSERT INTO masks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (mask_id, new_name, copied_ids[str(mask_row["input_id"])], mask_name,
+                     mask_row["width"], mask_row["height"], mask_row["feather"], now_iso()),
+                )
         return self.activate_session(new_name)
 
     def delete_session(self, name: str) -> dict[str, Any]:
@@ -241,7 +311,9 @@ class Repository:
 
     def inputs(self, session: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM inputs WHERE session_name = ?", (session,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM inputs WHERE session_name = ? ORDER BY position, created_at", (session,)
+            ).fetchall()
         return [self._input_json(row) for row in rows]
 
     @staticmethod
@@ -250,56 +322,200 @@ class Repository:
         return {
             "id": ident, "name": str(row["stored_name"]), "original_name": str(row["original_name"]),
             "width": int(row["width"]), "height": int(row["height"]),
+            "role": str(row["role"]), "position": int(row["position"]),
+            "size_bytes": int(row["size_bytes"]), "has_alpha": bool(row["has_alpha"]),
             "url": f"/media/uploads/{ident}", "thumb": f"/media/uploads/{ident}",
         }
 
-    def add_upload(self, session: str, original_name: str, source: Path) -> dict[str, Any]:
+    def add_upload(
+        self,
+        session: str,
+        original_name: str,
+        source: Path,
+        *,
+        role: str | None = None,
+        replace_base: bool = False,
+    ) -> dict[str, Any]:
+        session = self._session_name(session)
         suffix = Path(original_name).suffix.lower()
         if suffix not in IMAGE_EXTENSIONS:
             raise ValueError("reference must be PNG, JPEG, or WebP")
-        if source.stat().st_size > MAX_UPLOAD_BYTES:
+        size_bytes = source.stat().st_size
+        if size_bytes > MAX_UPLOAD_BYTES:
             raise ValueError("reference image is larger than 25 MB")
         try:
-            width, height = image_dimensions(source)
-        except (OSError, ValueError) as exc:
+            width, height, has_alpha = image_metadata(source)
+        except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
             raise ValueError("uploaded file is not a valid image") from exc
+        requested_role = str(role or "").strip().lower()
+        if requested_role and requested_role not in REFERENCE_ROLES:
+            raise ValueError("invalid reference role")
         ident = uuid.uuid4().hex
         target_name = f"{ident}{suffix}"
         target = self.upload_dir / target_name
-        source.replace(target)
-        stored_name = safe_name(original_name)
+        old_paths: list[str] = []
+        old_mask_path: str | None = None
         with self.lock, self.connect() as conn:
-            old = conn.execute("SELECT relative_path FROM inputs WHERE session_name = ?", (session,)).fetchone()
-            old_mask = conn.execute("SELECT relative_path FROM masks WHERE session_name = ?", (session,)).fetchone()
-            conn.execute("DELETE FROM inputs WHERE session_name = ?", (session,))
-            conn.execute(
-                "INSERT INTO inputs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (ident, session, stored_name, Path(original_name).name, width, height, target_name, now_iso()),
-            )
-        if old:
-            self._unlink(self.upload_dir, str(old["relative_path"]))
-        if old_mask:
-            self._unlink(self.mask_dir, str(old_mask["relative_path"]))
+            if conn.execute("SELECT 1 FROM sessions WHERE name = ?", (session,)).fetchone() is None:
+                raise ValueError("session not found")
+            rows = conn.execute(
+                "SELECT * FROM inputs WHERE session_name = ? ORDER BY position, created_at", (session,)
+            ).fetchall()
+            old_base = next((row for row in rows if row["role"] == "base"), None)
+            replaced_size = int(old_base["size_bytes"]) if replace_base and old_base else 0
+            next_count = len(rows) if replace_base and old_base else len(rows) + 1
+            if next_count > MAX_REFERENCES:
+                raise ValueError(f"a session can have at most {MAX_REFERENCES} reference images")
+            current_bytes = sum(int(row["size_bytes"]) for row in rows)
+            if current_bytes - replaced_size + size_bytes > MAX_SESSION_UPLOAD_BYTES:
+                raise ValueError("session reference images are larger than 100 MB in total")
+
+            final_role = "base" if replace_base or not old_base else (requested_role or "reference")
+            if final_role == "base" and old_base:
+                conn.execute("UPDATE inputs SET role = 'reference' WHERE id = ?", (old_base["id"],))
+                mask_row = conn.execute(
+                    "SELECT relative_path FROM masks WHERE session_name = ?", (session,)
+                ).fetchone()
+                old_mask_path = str(mask_row["relative_path"]) if mask_row else None
+                conn.execute("DELETE FROM masks WHERE session_name = ?", (session,))
+            if replace_base and old_base:
+                position = int(old_base["position"])
+                old_paths.append(str(old_base["relative_path"]))
+                conn.execute("DELETE FROM inputs WHERE id = ?", (old_base["id"],))
+            else:
+                position = max((int(row["position"]) for row in rows), default=-1) + 1
+
+            stored_name = self._unique_input_name(conn, session, original_name)
+            source.replace(target)
+            try:
+                conn.execute(
+                    "INSERT INTO inputs(id, session_name, stored_name, original_name, width, height, relative_path, "
+                    "role, position, size_bytes, has_alpha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (ident, session, stored_name, Path(original_name).name, width, height, target_name,
+                     final_role, position, size_bytes, int(has_alpha), now_iso()),
+                )
+            except Exception:
+                target.unlink(missing_ok=True)
+                raise
+        for old_path in old_paths:
+            self._unlink(self.upload_dir, old_path)
+        if old_mask_path:
+            self._unlink(self.mask_dir, old_mask_path)
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM inputs WHERE id = ?", (ident,)).fetchone()
         return self._input_json(row)
 
-    def delete_input(self, session: str, name: str) -> None:
+    @staticmethod
+    def _unique_input_name(conn: sqlite3.Connection, session: str, original_name: str) -> str:
+        candidate = safe_name(original_name)
+        used = {
+            str(row["stored_name"]).lower()
+            for row in conn.execute("SELECT stored_name FROM inputs WHERE session_name = ?", (session,))
+        }
+        if candidate.lower() not in used:
+            return candidate
+        path = Path(candidate)
+        stem = path.stem or "image"
+        suffix = path.suffix
+        for number in range(2, MAX_REFERENCES + 2):
+            numbered = safe_name(f"{stem}-{number}{suffix}")
+            if numbered.lower() not in used:
+                return numbered
+        raise ValueError("could not assign a unique reference name")
+
+    def reorder_inputs(self, session: str, ordered_ids: list[str]) -> list[dict[str, Any]]:
+        session = self._session_name(session)
+        if not isinstance(ordered_ids, list) or not all(isinstance(item, str) for item in ordered_ids):
+            raise ValueError("ordered_ids must be an array of reference ids")
+        with self.lock, self.connect() as conn:
+            existing = [
+                str(row["id"]) for row in conn.execute(
+                    "SELECT id FROM inputs WHERE session_name = ? ORDER BY position, created_at", (session,)
+                )
+            ]
+            if len(ordered_ids) != len(existing) or set(ordered_ids) != set(existing):
+                raise ValueError("ordered_ids must contain every session reference exactly once")
+            for position, ident in enumerate(ordered_ids):
+                conn.execute(
+                    "UPDATE inputs SET position = ? WHERE id = ? AND session_name = ?",
+                    (position, ident, session),
+                )
+        return self.inputs(session)
+
+    def set_input_role(self, session: str, ident: str, role: str) -> dict[str, Any]:
+        session = self._session_name(session)
+        role = str(role or "").strip().lower()
+        if role not in REFERENCE_ROLES:
+            raise ValueError("invalid reference role")
+        old_mask_path: str | None = None
         with self.lock, self.connect() as conn:
             row = conn.execute(
-                "SELECT relative_path FROM inputs WHERE session_name = ? AND stored_name = ?", (session, name)
+                "SELECT * FROM inputs WHERE session_name = ? AND id = ?", (session, ident)
             ).fetchone()
-            mask_row = conn.execute("SELECT relative_path FROM masks WHERE session_name = ?", (session,)).fetchone()
-            conn.execute("DELETE FROM inputs WHERE session_name = ? AND stored_name = ?", (session, name))
-        if row:
-            self._unlink(self.upload_dir, str(row["relative_path"]))
-        if row and mask_row:
-            self._unlink(self.mask_dir, str(mask_row["relative_path"]))
+            if not row:
+                raise ValueError("reference not found")
+            if role == "base" and row["role"] != "base":
+                conn.execute("UPDATE inputs SET role = 'reference' WHERE session_name = ? AND role = 'base'", (session,))
+                mask_row = conn.execute(
+                    "SELECT relative_path FROM masks WHERE session_name = ?", (session,)
+                ).fetchone()
+                old_mask_path = str(mask_row["relative_path"]) if mask_row else None
+                conn.execute("DELETE FROM masks WHERE session_name = ?", (session,))
+            elif row["role"] == "base" and role != "base":
+                raise ValueError("assign another reference as base before changing this role")
+            conn.execute("UPDATE inputs SET role = ? WHERE id = ?", (role, ident))
+            updated = conn.execute("SELECT * FROM inputs WHERE id = ?", (ident,)).fetchone()
+        if old_mask_path:
+            self._unlink(self.mask_dir, old_mask_path)
+        return self._input_json(updated)
+
+    def delete_input(self, session: str, name: str = "", *, ident: str = "") -> None:
+        session = self._session_name(session)
+        old_mask_path: str | None = None
+        with self.lock, self.connect() as conn:
+            if ident:
+                row = conn.execute(
+                    "SELECT * FROM inputs WHERE session_name = ? AND id = ?", (session, ident)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM inputs WHERE session_name = ? AND stored_name = ?", (session, name)
+                ).fetchone()
+            if not row:
+                return
+            if row["role"] == "base":
+                mask_row = conn.execute(
+                    "SELECT relative_path FROM masks WHERE session_name = ?", (session,)
+                ).fetchone()
+                old_mask_path = str(mask_row["relative_path"]) if mask_row else None
+                conn.execute("DELETE FROM masks WHERE session_name = ?", (session,))
+            conn.execute("DELETE FROM inputs WHERE id = ?", (row["id"],))
+            remaining = conn.execute(
+                "SELECT id FROM inputs WHERE session_name = ? ORDER BY position, created_at", (session,)
+            ).fetchall()
+            if row["role"] == "base" and remaining:
+                conn.execute("UPDATE inputs SET role = 'base' WHERE id = ?", (remaining[0]["id"],))
+            for position, item in enumerate(remaining):
+                conn.execute("UPDATE inputs SET position = ? WHERE id = ?", (position, item["id"]))
+        self._unlink(self.upload_dir, str(row["relative_path"]))
+        if old_mask_path:
+            self._unlink(self.mask_dir, old_mask_path)
 
     def input_path(self, session: str) -> Path | None:
         with self.connect() as conn:
-            row = conn.execute("SELECT relative_path FROM inputs WHERE session_name = ?", (session,)).fetchone()
+            row = conn.execute(
+                "SELECT relative_path FROM inputs WHERE session_name = ? AND role = 'base'", (session,)
+            ).fetchone()
         return resolve_under(self.upload_dir, str(row["relative_path"])) if row else None
+
+    def input_paths(self, session: str) -> list[tuple[dict[str, Any], Path]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM inputs WHERE session_name = ? ORDER BY position, created_at", (session,)
+            ).fetchall()
+        return [
+            (self._input_json(row), resolve_under(self.upload_dir, str(row["relative_path"]))) for row in rows
+        ]
 
     def mask(self, session: str) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -319,7 +535,9 @@ class Repository:
         if not 0 <= feather <= 100:
             raise ValueError("mask feather must be between 0 and 100")
         with self.connect() as conn:
-            input_row = conn.execute("SELECT * FROM inputs WHERE session_name = ?", (session,)).fetchone()
+            input_row = conn.execute(
+                "SELECT * FROM inputs WHERE session_name = ? AND role = 'base'", (session,)
+            ).fetchone()
         if not input_row:
             raise ValueError("add a reference image before painting a mask")
         try:
@@ -433,7 +651,7 @@ class Repository:
         path = self.media_path("gallery", ident)
         temporary = self.work_dir / f"upload-{uuid.uuid4().hex}{path.suffix}"
         shutil.copy2(path, temporary)
-        return self.add_upload(session, path.name, temporary)
+        return self.add_upload(session, path.name, temporary, role="base", replace_base=True)
 
     def work_output(self, job_id: str) -> Path:
         directory = self.work_dir / job_id
@@ -486,6 +704,14 @@ def image_dimensions(path: Path) -> tuple[int, int]:
             source.seek(2)
             return _jpeg_dimensions(source)
     raise ValueError("unsupported image format")
+
+
+def image_metadata(path: Path) -> tuple[int, int, bool]:
+    width, height = image_dimensions(path)
+    with Image.open(path) as image:
+        image.load()
+        has_alpha = "A" in image.getbands() or "transparency" in image.info
+    return width, height, has_alpha
 
 
 def _valid_dimensions(width: int, height: int) -> tuple[int, int]:

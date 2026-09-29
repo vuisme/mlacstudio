@@ -60,6 +60,16 @@
       </section>
 
       <section>
+        <label class="label" for="preset">Preset</label>
+        <select id="preset">
+          <option value="none">None</option>
+          <option value="transparent">Transparent generation</option>
+          <option value="subject-extraction">Subject extraction</option>
+        </select>
+        <p class="hint capability-warning" id="rgbaWarning" hidden></p>
+      </section>
+
+      <section>
         <div class="label">Aspect ratio <span class="right muted" id="ratioSrc"></span></div>
         <div class="ratios" id="ratios"></div>
         <div class="readout">
@@ -126,11 +136,11 @@
     <aside class="panel side" aria-label="Inputs and activity">
       <div class="side-scroll">
         <section>
-          <div class="label">Reference image <span class="muted" id="refCount"></span></div>
-          <label class="drop" id="drop" for="fileInput">Drop one PNG, JPEG, or WebP here, or click to choose. A new upload replaces the current reference.</label>
-          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden>
+          <div class="label">Reference images <span class="muted" id="refCount"></span></div>
+          <label class="drop" id="drop" for="fileInput">Drop PNG, JPEG, or WebP references here, or click to choose.</label>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
           <div class="refs" id="refs"></div>
-          <p class="hint">Adding one image switches generation to image-to-image mode.</p>
+          <p class="hint">The base image is the edit target. Auxiliary references are sent in the order shown.</p>
           <div class="mask-editor" id="maskEditor" hidden>
             <div class="label">Brush mask <span class="right muted" id="maskStatus">No selection</span></div>
             <div class="mask-tools" role="toolbar" aria-label="Mask tools">

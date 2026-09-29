@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image, ImageFilter
 
-from storage import Repository, image_dimensions, now_iso
+from storage import MAX_REFERENCES, Repository, image_dimensions, image_metadata, now_iso
 
 RATIOS = {
     "1:1": (2048, 2048), "4:3": (2400, 1792), "3:4": (1792, 2400),
@@ -34,6 +34,46 @@ RATIOS = {
 PATH_KEYS = ("sd_cli", "sd_server", "transformer", "text_encoder", "mmproj", "vae")
 MODEL_STATES = {"unloaded", "loading", "ready", "rendering", "idle", "error"}
 STEP_RE = re.compile(r"(?:step\s*)?(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+PRESETS = {"none", "transparent", "subject-extraction"}
+
+
+def capability_report(raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    features_value = data.get("features") or data.get("supported_features") or []
+    if isinstance(features_value, dict):
+        features = {str(key).lower() for key, value in features_value.items() if value}
+    elif isinstance(features_value, list):
+        features = {str(value).lower() for value in features_value}
+    else:
+        features = set()
+
+    def boolean(*keys: str) -> bool | None:
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, bool):
+                return value
+        return None
+
+    maximum = data.get("max_reference_images", data.get("max_ref_images"))
+    try:
+        max_references = max(1, min(MAX_REFERENCES, int(maximum))) if maximum is not None else MAX_REFERENCES
+    except (TypeError, ValueError):
+        max_references = MAX_REFERENCES
+    multi = boolean("multi_reference", "supports_multi_reference", "supports_multiple_ref_images")
+    if multi is None:
+        multi = max_references > 1 or bool(features & {"multi_reference", "multi-reference", "multiple_ref_images"})
+    rgba = boolean("rgba", "supports_rgba", "transparent_output", "supports_transparent_output")
+    if rgba is None:
+        rgba = bool(features & {"rgba", "alpha", "transparent_output", "transparent-output"})
+    return {
+        "multi_reference": bool(multi),
+        "max_references": max_references if multi else 1,
+        "rgba": bool(rgba),
+        "reported": bool(data),
+        "rgba_reported": rgba is not None and any(
+            key in data for key in ("rgba", "supports_rgba", "transparent_output", "supports_transparent_output")
+        ) or bool(features & {"rgba", "alpha", "transparent_output", "transparent-output"}),
+    }
 
 
 def prepare_inference_mask(mask_path: Path, target: Path, feather: int = 0) -> Path:
@@ -92,6 +132,10 @@ def clean_settings(request: dict[str, Any], *, require_prompt: bool = True) -> d
         "steps": as_int(request.get("steps", 20), "steps", 1, 200),
         "seed": as_int(request.get("seed", 42), "seed", 0, 2**63 - 1),
     }
+    preset = str(request.get("preset") or "none")
+    if preset not in PRESETS:
+        raise ValueError("invalid preset")
+    settings["preset"] = preset
     for key in ("width", "height"):
         raw = request.get(key)
         if raw in (None, ""):
@@ -225,14 +269,17 @@ class StableDiffusionAdapter:
             "--output", job["output"],
             *self.config.extra_args,
         ]
-        if job.get("input"):
+        references = job.get("references") or (
+            [{"path": job["input"]}] if job.get("input") else []
+        )
+        for reference in references:
             # Qwen-Image-2.1 editing in stable-diffusion.cpp uses a vision
             # reference image, not the Stable Diffusion img2img --init-img path.
-            argv.extend(["--ref-image", job["input"]])
-            if job.get("mask"):
-                inference_mask = str(Path(job["output"]).with_name("inference-mask.png"))
-                prepare_inference_mask(Path(job["mask"]), Path(inference_mask), int(job.get("mask_feather") or 0))
-                argv.extend(["--mask", inference_mask])
+            argv.extend(["--ref-image", str(reference["path"])])
+        if job.get("input") and job.get("mask"):
+            inference_mask = str(Path(job["output"]).with_name("inference-mask.png"))
+            prepare_inference_mask(Path(job["mask"]), Path(inference_mask), int(job.get("mask_feather") or 0))
+            argv.extend(["--mask", inference_mask])
         return argv
 
     def run(
@@ -383,6 +430,7 @@ class SdServerSupervisor:
         self.status_callback: Callable[[dict[str, Any]], None] | None = None
         self.active_log: Callable[[str, bool], None] | None = None
         self.recent_logs: deque[str] = deque(maxlen=30)
+        self.capabilities = capability_report()
         self.stopping = threading.Event()
         self.monitor: threading.Thread | None = None
         if start_monitor:
@@ -416,6 +464,7 @@ class SdServerSupervisor:
                 "idle_timeout": self.config.idle_timeout,
                 "idle_remaining": max(0, round(self.config.idle_timeout - idle_for)) if idle_for else None,
                 "error": self.error,
+                "capabilities": dict(self.capabilities),
             }
 
     def _set_state(self, state: str, *, error: str | None = None, backend: str = "sd-server") -> None:
@@ -472,7 +521,8 @@ class SdServerSupervisor:
                 tail = "; ".join(self.recent_logs)
                 raise RuntimeError(f"sd-server exited during startup{': ' + tail if tail else ''}")
             try:
-                self.request_json("GET", self._url("/sdcpp/v1/capabilities"), None, 2)
+                reported = self.request_json("GET", self._url("/sdcpp/v1/capabilities"), None, 2)
+                self.capabilities = capability_report(reported)
                 self.last_activity = self.clock()
                 self._set_state("ready")
                 return
@@ -514,12 +564,15 @@ class SdServerSupervisor:
             "auto_resize_ref_image": True, "increase_ref_index": False,
             "ref_images": [], "mask_image": None,
         }
-        if job.get("input"):
-            payload["ref_images"] = [_data_url(Path(job["input"]))]
-            if job.get("mask"):
-                inference_mask = Path(job["output"]).with_name("inference-mask.png")
-                prepare_inference_mask(Path(job["mask"]), inference_mask, int(job.get("mask_feather") or 0))
-                payload["mask_image"] = _data_url(inference_mask)
+        references = job.get("references") or (
+            [{"path": job["input"]}] if job.get("input") else []
+        )
+        payload["ref_images"] = [_data_url(Path(reference["path"])) for reference in references]
+        payload["increase_ref_index"] = len(references) > 1
+        if job.get("input") and job.get("mask"):
+            inference_mask = Path(job["output"]).with_name("inference-mask.png")
+            prepare_inference_mask(Path(job["mask"]), inference_mask, int(job.get("mask_feather") or 0))
+            payload["mask_image"] = _data_url(inference_mask)
         return payload
 
     def run(
@@ -714,8 +767,20 @@ class RenderQueue:
             raise ValueError("session not found")
         ident = uuid.uuid4().hex
         output = self.repository.work_output(ident)
-        input_items = self.repository.inputs(session)
-        input_item = input_items[0] if input_items else None
+        input_sources = self.repository.input_paths(session)
+        input_items = [item for item, _ in input_sources]
+        input_item = next((item for item in input_items if item["role"] == "base"), None)
+        capabilities = self.capabilities()
+        if settings["preset"] == "subject-extraction" and not input_item:
+            raise ValueError("subject extraction requires a base reference image")
+        if settings["preset"] != "none" and capabilities.get("rgba_reported") and not capabilities.get("rgba"):
+            raise ValueError("the active inference backend reports that RGBA output is unsupported")
+        if len(input_items) > int(capabilities.get("max_references") or 1):
+            raise ValueError(
+                f"the active inference backend supports at most {capabilities.get('max_references') or 1} reference image(s)"
+            )
+        if len(input_items) > 1 and not capabilities.get("multi_reference"):
+            raise ValueError("the active inference backend does not support multiple reference images")
         input_path = self.repository.input_path(session)
         mask_path = self.repository.mask_path(session)
         mask_record = self.repository.mask(session) if mask_path else None
@@ -723,24 +788,31 @@ class RenderQueue:
             settings["steps"] = 12
         job_input: Path | None = None
         job_mask: Path | None = None
-        if input_path:
-            job_input = output.parent / f"source{input_path.suffix.lower()}"
-            shutil.copy2(input_path, job_input)
+        job_references: list[dict[str, Any]] = []
+        for index, (item, source) in enumerate(input_sources, start=1):
+            copied = output.parent / f"reference-{index}{source.suffix.lower()}"
+            shutil.copy2(source, copied)
+            job_references.append({**item, "path": str(copied)})
+            if item["role"] == "base":
+                job_input = copied
+        if input_path and job_input:
             if mask_path:
                 job_mask = output.parent / "mask.png"
                 shutil.copy2(mask_path, job_mask)
         resolved_prompt = settings["prompt"]
-        if input_item:
+        for index, item in enumerate(input_items, start=1):
             resolved_prompt = re.sub(
-                rf"@{re.escape(input_item['name'])}(?![A-Za-z0-9._-])", "<image1>", resolved_prompt
+                rf"@{re.escape(item['name'])}(?![A-Za-z0-9._-])", f"<image{index}>", resolved_prompt
             )
         job = {
             "id": ident, "session": session, "status": "queued", "settings": settings,
             "input": str(job_input) if job_input else None, "mask": str(job_mask) if job_mask else None,
+            "references": job_references,
             "mask_feather": int(mask_record["feather"]) if mask_record else 0,
             "output": str(output),
             "input_width": input_item["width"] if input_item else None,
             "input_height": input_item["height"] if input_item else None,
+            "rgba_supported": bool(capabilities.get("rgba")),
             "resolved_prompt": resolved_prompt,
             "progress": {"stage": "load", "step": 0, "total": settings["steps"]},
             "result": {}, "created": now_iso(), "cancel_requested": False,
@@ -786,7 +858,13 @@ class RenderQueue:
         return {
             "status": "unloaded", "backend": "sd-cli", "pid": None,
             "idle_timeout": None, "idle_remaining": None, "error": None,
+            "capabilities": capability_report(),
         }
+
+    def capabilities(self) -> dict[str, Any]:
+        state = self.model_state()
+        value = state.get("capabilities")
+        return dict(value) if isinstance(value, dict) else capability_report()
 
     def can_unload_model(self) -> bool:
         return self.is_idle() and hasattr(self.adapter, "unload")
@@ -871,17 +949,19 @@ class RenderQueue:
                 composite_masked_output(
                     Path(job["output"]), Path(job["input"]), Path(job["mask"]), int(job.get("mask_feather") or 0)
                 )
-            width, height = image_dimensions(Path(job["output"]))
+            width, height, has_alpha = image_metadata(Path(job["output"]))
             elapsed = time.monotonic() - started
             params = {
                 "name": f"take-{job['id'][:8]}.png", "prompt": job["settings"]["prompt"],
                 "seed": job["settings"]["seed"], "steps": job["settings"]["steps"],
                 "width": width, "height": height, "mode": "I2I" if job.get("input") else "T2I",
                 "edit": bool(job.get("input")), "masked": bool(job.get("mask")),
+                "has_alpha": has_alpha, "preset": job["settings"].get("preset", "none"),
+                "reference_count": len(job.get("references") or []),
                 "elapsed": elapsed, "settings": job["settings"],
             }
             take_id = self.repository.add_take(job["session"], Path(job["output"]), params)
-            job["result"] = {"take_id": take_id, "width": width, "height": height}
+            job["result"] = {"take_id": take_id, "width": width, "height": height, "has_alpha": has_alpha}
             job["status"] = "done"
             log(f"Saved take {take_id} ({width}x{height})")
             self.repository.update_job(

@@ -32,7 +32,7 @@ from security import (
     same_origin_allowed,
     session_cookie,
 )
-from storage import MAX_MASK_BYTES, MAX_UPLOAD_BYTES, Repository, resolve_under
+from storage import MAX_MASK_BYTES, MAX_UPLOAD_BYTES, REFERENCE_ROLES, Repository, resolve_under
 
 WEB_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WEB_DIR.parent
@@ -326,10 +326,14 @@ class Handler(BaseHTTPRequestHandler):
                 "models": self.app.models_state(),
                 "updates": self.app.updates.status(),
                 "idle_timeout": self.app.config.idle_timeout,
+                "capabilities": self.app.runner.capabilities(),
+                "reference_roles": list(REFERENCE_ROLES),
                 "csrf": auth.csrf if auth else "",
             }, head=head)
-        if path == "/api/inputs":
+        if path in {"/api/inputs", "/api/references"}:
             return self._json(200, self.app.repository.inputs(session), head=head)
+        if path == "/api/capabilities":
+            return self._json(200, self.app.runner.capabilities(), head=head)
         if path == "/api/mask":
             return self._json(200, {"mask": self.app.repository.mask(session)}, head=head)
         if path == "/api/takes":
@@ -345,8 +349,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"}, head=head)
 
     def _authenticated_post(self, path: str) -> None:
-        if path == "/api/upload":
-            return self._upload()
+        if path in {"/api/upload", "/api/references/add"}:
+            return self._upload(replace_base=path == "/api/upload")
         if path == "/api/mask":
             return self._mask_upload()
         body = self._json_body()
@@ -376,7 +380,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.app.repository.delete_session(session_name))
         if path == "/api/inputs/delete":
             self.app.repository.delete_input(session_name, str(body.get("name") or ""))
+            self.app.runner._broadcast("inputs", {"session": session_name})
             return self._json(200, {"ok": True})
+        if path == "/api/references/remove":
+            self.app.repository.delete_input(session_name, ident=str(body.get("id") or ""))
+            self.app.runner._broadcast("inputs", {"session": session_name})
+            return self._json(200, self.app.repository.inputs(session_name))
+        if path == "/api/references/reorder":
+            result = self.app.repository.reorder_inputs(session_name, body.get("ordered_ids"))
+            self.app.runner._broadcast("inputs", {"session": session_name})
+            return self._json(200, result)
+        if path == "/api/references/role":
+            result = self.app.repository.set_input_role(
+                session_name, str(body.get("id") or ""), str(body.get("role") or "")
+            )
+            self.app.runner._broadcast("inputs", {"session": session_name})
+            return self._json(200, result)
         if path == "/api/takes/delete":
             self.app.repository.delete_take(str(body.get("id") or ""))
             return self._json(200, {"ok": True})
@@ -452,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
             raise
         return self._json(202 if path in {"/api/updates/check", "/api/updates/channel", "/api/updates/install", "/api/updates/rollback"} else 200, result)
 
-    def _upload(self) -> None:
+    def _upload(self, *, replace_base: bool = False) -> None:
         length = self._content_length(MAX_UPLOAD_BYTES)
         original = unquote(self.headers.get("X-Filename", ""))
         if not original:
@@ -464,7 +483,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with os.fdopen(fd, "wb") as output:
                 self._copy_body(output, length)
-            result = self.app.repository.add_upload(session, original, temp)
+            result = self.app.repository.add_upload(
+                session,
+                original,
+                temp,
+                role=self.headers.get("X-Reference-Role"),
+                replace_base=replace_base,
+            )
             self.app.runner._broadcast("inputs", {"session": session})
             self._json(200, result)
         finally:

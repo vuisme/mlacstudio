@@ -266,6 +266,61 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request("GET", f"/media/uploads/{media_id}")[0], 401)
         self.assertEqual(self.request("GET", f"/media/uploads/{media_id}", headers={"Cookie": cookie})[0], 200)
 
+    def test_reference_apis_add_list_reorder_role_and_remove(self) -> None:
+        cookie, csrf = self.setup_admin()
+        auth = {"Cookie": cookie, "X-CSRF-Token": csrf}
+        first_headers = {**auth, "X-Filename": "base.png"}
+        status, _, payload = self.request_raw(
+            "POST", "/api/upload?session=session-1", self.png(2, 2, (1, 2, 3), "RGB"), first_headers
+        )
+        self.assertEqual(status, 200, payload)
+        base = json.loads(payload)
+        second_headers = {**auth, "X-Filename": "style.png", "X-Reference-Role": "style"}
+        status, _, payload = self.request_raw(
+            "POST", "/api/references/add?session=session-1", self.png(2, 2, (4, 5, 6), "RGB"), second_headers
+        )
+        self.assertEqual(status, 200, payload)
+        style = json.loads(payload)
+
+        status, _, payload = self.request("GET", "/api/references?session=session-1", headers={"Cookie": cookie})
+        self.assertEqual(status, 200, payload)
+        self.assertEqual([item["role"] for item in json.loads(payload)], ["base", "style"])
+        self.assertEqual(self.request(
+            "POST", "/api/references/reorder",
+            {"session": "session-1", "ordered_ids": [style["id"], base["id"]]},
+            {"Cookie": cookie},
+        )[0], 403)
+        status, _, payload = self.request(
+            "POST", "/api/references/reorder",
+            {"session": "session-1", "ordered_ids": [style["id"], base["id"]]}, auth,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual([item["id"] for item in json.loads(payload)], [style["id"], base["id"]])
+
+        status, _, payload = self.request(
+            "POST", "/api/references/role",
+            {"session": "session-1", "id": style["id"], "role": "base"}, auth,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(json.loads(payload)["role"], "base")
+        status, _, payload = self.request(
+            "POST", "/api/references/remove", {"session": "session-1", "id": base["id"]}, auth,
+        )
+        self.assertEqual(status, 200, payload)
+        remaining = json.loads(payload)
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["id"], style["id"])
+
+    def test_config_reports_reference_and_rgba_capabilities(self) -> None:
+        cookie, _ = self.setup_admin()
+        status, _, payload = self.request("GET", "/api/config", headers={"Cookie": cookie})
+        self.assertEqual(status, 200, payload)
+        config = json.loads(payload)
+        self.assertEqual(config["capabilities"]["max_references"], 10)
+        self.assertIn("multi_reference", config["capabilities"])
+        self.assertIn("rgba", config["capabilities"])
+        self.assertIn("base", config["reference_roles"])
+
     @staticmethod
     def png(width: int, height: int, color: int | tuple[int, ...] = 255, mode: str = "L") -> bytes:
         output = io.BytesIO()

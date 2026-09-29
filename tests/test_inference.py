@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "web"))
 
 from inference import (
+    capability_report,
     SdServerSupervisor,
     StableDiffusionAdapter,
     StudioConfig,
@@ -224,6 +225,25 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue((Path(job["output"]).parent / "inference-mask.png").is_file())
         supervisor.close()
 
+    def test_native_request_preserves_reference_order_and_increases_indices(self) -> None:
+        root, supervisor, api, _, _ = self.server_fixture()
+        first = root / "first.png"
+        second = root / "second.png"
+        Image.new("RGB", (2, 2), (1, 2, 3)).save(first)
+        Image.new("RGBA", (2, 2), (4, 5, 6, 7)).save(second)
+        job = self.native_job(root, "multi")
+        job.update({
+            "input": str(second),
+            "references": [{"path": str(first)}, {"path": str(second)}],
+        })
+        supervisor.run(job, lambda line, rewrites: None, lambda progress: None)
+        submit = next(call for call in api.calls if call[1].endswith("/sdcpp/v1/img_gen"))
+        payload = submit[2]
+        self.assertTrue(payload["increase_ref_index"])
+        decoded = [base64.b64decode(value.split(",", 1)[1]) for value in payload["ref_images"]]
+        self.assertEqual(decoded, [first.read_bytes(), second.read_bytes()])
+        supervisor.close()
+
     def test_missing_sd_server_uses_sd_cli_fallback(self) -> None:
         root, supervisor, _, processes, _ = self.server_fixture()
         fallback = RecordingFallback()
@@ -288,6 +308,39 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(inference_mask.is_file())
         self.assertNotIn("--init-img", argv)
 
+    def test_cli_repeats_reference_argument_in_order(self) -> None:
+        root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
+        repo = Repository(root)
+        paths = {}
+        for key in ("sd_cli", "transformer", "text_encoder", "mmproj", "vae"):
+            path = root / f"{key}.bin"
+            path.write_bytes(b"placeholder")
+            paths[key] = str(path)
+        adapter = StableDiffusionAdapter(StudioConfig(paths, repo))
+        first = root / "first.png"
+        second = root / "second.png"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        job = {
+            "id": "multi", "settings": {"prompt": "test", "ratio": "1:1", "width": 512, "height": 512, "steps": 2, "seed": 7},
+            "output": str(root / "out.png"), "input": str(first), "mask": None,
+            "references": [{"path": str(second)}, {"path": str(first)}], "cancel_requested": False,
+        }
+        argv = adapter.build_argv(job)
+        indices = [index for index, value in enumerate(argv) if value == "--ref-image"]
+        self.assertEqual([argv[index + 1] for index in indices], [str(second), str(first)])
+
+    def test_capability_report_gates_explicit_backend_limits_and_rgba(self) -> None:
+        report = capability_report({
+            "supports_multi_reference": False,
+            "max_reference_images": 4,
+            "supports_rgba": False,
+        })
+        self.assertFalse(report["multi_reference"])
+        self.assertEqual(report["max_references"], 1)
+        self.assertFalse(report["rgba"])
+        self.assertTrue(report["rgba_reported"])
+
     def test_mask_composite_resizes_and_preserves_hard_zero_pixels(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
         root.mkdir(parents=True, exist_ok=True)
@@ -295,7 +348,7 @@ class AdapterTests(unittest.TestCase):
         output = root / "output.png"
         mask = root / "mask.png"
         source_pixels = [
-            (1, 2, 3, 255), (10, 20, 30, 255), (40, 50, 60, 255),
+            (1, 2, 3, 0), (10, 20, 30, 255), (40, 50, 60, 255),
             (70, 80, 90, 255), (100, 110, 120, 255), (130, 140, 150, 255),
         ]
         source_image = Image.new("RGBA", (3, 2))

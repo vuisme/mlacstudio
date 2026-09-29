@@ -177,13 +177,20 @@ textarea { resize: vertical; min-height: 112px; }
 /* right */
 .drop { display: block; border: 1.5px dashed var(--border-2); border-radius: 8px; padding: 14px; text-align: center; font-size: 12px; color: var(--muted); cursor: pointer; }
 .drop:hover, .drop.drag { border-color: var(--accent); color: var(--text); }
-.refs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
-.ref { position: relative; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; border: 1.5px solid var(--border); background: var(--panel-2); }
-.ref img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.ref .n { position: absolute; top: 2px; left: 2px; font: 600 10px/13px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--accent); color: var(--on-accent); }
-.ref .x { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border: none; border-radius: 4px; background: rgb(0 0 0 / 0.6); color: #f1ede4; font-size: 10px; line-height: 16px; padding: 0; cursor: pointer; }
-.ref.follow { border-color: var(--accent); }
-.ref.empty { border-style: dashed; background: transparent; }
+.drop.disabled { opacity: 0.5; pointer-events: none; }
+.refs { display: grid; gap: 7px; margin-top: 8px; }
+.ref { display: grid; grid-template-columns: 42px minmax(0, 1fr) 98px auto; gap: 7px; align-items: center; min-height: 44px; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
+.ref img { width: 42px; height: 42px; object-fit: cover; border-radius: 5px; background: repeating-conic-gradient(var(--check-a) 0% 25%, var(--check-b) 0% 50%) 50% / 10px 10px; cursor: pointer; }
+.ref .ref-meta { min-width: 0; }
+.ref .ref-meta b, .ref .ref-meta small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref .ref-meta b { font: 600 11px/15px var(--mono); }
+.ref .ref-meta small { color: var(--faint); font-size: 10px; }
+.ref select { width: 98px; min-width: 0; height: 28px; padding: 3px 5px; font-size: 10px; }
+.ref .ref-actions { display: flex; gap: 3px; }
+.ref .ref-actions button { width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--muted); cursor: pointer; }
+.ref .ref-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.ref.base { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.capability-warning { padding: 7px 8px; border-left: 3px solid #d78b1f; background: #fff3d8; color: #70420a; }
 .link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 11px; padding: 0; }
 
 .mask-editor { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
