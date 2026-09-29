@@ -80,6 +80,8 @@ class PathSafetyTests(unittest.TestCase):
         self.assertEqual(references[0]["position"], 0)
         self.assertTrue(references[0]["has_alpha"])
         self.assertEqual(repository.input_path("session-1"), image_path.resolve())
+        with repository.connect() as conn:
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_references_keep_order_roles_alpha_and_promote_new_base_on_remove(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
@@ -95,8 +97,10 @@ class PathSafetyTests(unittest.TestCase):
         subject = upload("subject.png", "RGB", (7, 8, 9))
         repository.set_input_role("session-1", style["id"], "style")
         repository.set_input_role("session-1", subject["id"], "subject")
-        reordered = repository.reorder_inputs("session-1", [subject["id"], base["id"], style["id"]])
-        self.assertEqual([item["id"] for item in reordered], [subject["id"], base["id"], style["id"]])
+        with self.assertRaisesRegex(ValueError, "base reference must remain first"):
+            repository.reorder_inputs("session-1", [subject["id"], base["id"], style["id"]])
+        reordered = repository.reorder_inputs("session-1", [base["id"], subject["id"], style["id"]])
+        self.assertEqual([item["id"] for item in reordered], [base["id"], subject["id"], style["id"]])
         self.assertTrue(next(item for item in reordered if item["id"] == base["id"])["has_alpha"])
 
         repository.delete_input("session-1", ident=base["id"])

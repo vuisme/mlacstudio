@@ -281,21 +281,27 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200, payload)
         style = json.loads(payload)
+        third_headers = {**auth, "X-Filename": "subject.png", "X-Reference-Role": "subject"}
+        status, _, payload = self.request_raw(
+            "POST", "/api/references/add?session=session-1", self.png(2, 2, (7, 8, 9), "RGB"), third_headers
+        )
+        self.assertEqual(status, 200, payload)
+        subject = json.loads(payload)
 
         status, _, payload = self.request("GET", "/api/references?session=session-1", headers={"Cookie": cookie})
         self.assertEqual(status, 200, payload)
-        self.assertEqual([item["role"] for item in json.loads(payload)], ["base", "style"])
+        self.assertEqual([item["role"] for item in json.loads(payload)], ["base", "style", "subject"])
         self.assertEqual(self.request(
             "POST", "/api/references/reorder",
-            {"session": "session-1", "ordered_ids": [style["id"], base["id"]]},
+            {"session": "session-1", "ordered_ids": [base["id"], subject["id"], style["id"]]},
             {"Cookie": cookie},
         )[0], 403)
         status, _, payload = self.request(
             "POST", "/api/references/reorder",
-            {"session": "session-1", "ordered_ids": [style["id"], base["id"]]}, auth,
+            {"session": "session-1", "ordered_ids": [base["id"], subject["id"], style["id"]]}, auth,
         )
         self.assertEqual(status, 200, payload)
-        self.assertEqual([item["id"] for item in json.loads(payload)], [style["id"], base["id"]])
+        self.assertEqual([item["id"] for item in json.loads(payload)], [base["id"], subject["id"], style["id"]])
 
         status, _, payload = self.request(
             "POST", "/api/references/role",
@@ -308,7 +314,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200, payload)
         remaining = json.loads(payload)
-        self.assertEqual(len(remaining), 1)
+        self.assertEqual(len(remaining), 2)
         self.assertEqual(remaining[0]["id"], style["id"])
 
     def test_config_reports_reference_and_rgba_capabilities(self) -> None:

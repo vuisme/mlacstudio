@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "web"))
 
 from inference import (
     capability_report,
+    RenderQueue,
     SdServerSupervisor,
     StableDiffusionAdapter,
     StudioConfig,
@@ -69,11 +70,12 @@ class NativeApi:
     def __init__(self) -> None:
         self.calls = []
         self.next_job = 0
+        self.capabilities = {"supported_modes": ["img_gen"]}
 
     def __call__(self, method, url, payload, timeout):
         self.calls.append((method, url, payload, timeout))
         if url.endswith("/sdcpp/v1/capabilities"):
-            return {"supported_modes": ["img_gen"]}
+            return self.capabilities
         if url.endswith("/sdcpp/v1/img_gen"):
             self.next_job += 1
             return {"id": f"native-{self.next_job}", "status": "queued"}
@@ -244,6 +246,23 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(decoded, [first.read_bytes(), second.read_bytes()])
         supervisor.close()
 
+    def test_native_server_rechecks_reported_reference_limit_before_submit(self) -> None:
+        root, supervisor, api, _, _ = self.server_fixture()
+        api.capabilities = {"supports_multi_reference": False, "max_reference_images": 1}
+        first = root / "first.png"
+        second = root / "second.png"
+        Image.new("RGB", (2, 2), (1, 2, 3)).save(first)
+        Image.new("RGB", (2, 2), (4, 5, 6)).save(second)
+        job = self.native_job(root, "limited")
+        job.update({
+            "input": str(first),
+            "references": [{"path": str(first)}, {"path": str(second)}],
+        })
+        with self.assertRaisesRegex(ValueError, "at most 1"):
+            supervisor.run(job, lambda line, rewrites: None, lambda progress: None)
+        self.assertFalse(any(call[1].endswith("/sdcpp/v1/img_gen") for call in api.calls))
+        supervisor.close()
+
     def test_missing_sd_server_uses_sd_cli_fallback(self) -> None:
         root, supervisor, _, processes, _ = self.server_fixture()
         fallback = RecordingFallback()
@@ -340,6 +359,34 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(report["max_references"], 1)
         self.assertFalse(report["rgba"])
         self.assertTrue(report["rgba_reported"])
+
+    def test_render_queue_rejects_explicitly_unsupported_multi_reference_and_rgba(self) -> None:
+        class UnsupportedAdapter:
+            def status(self):
+                return {
+                    "status": "unloaded",
+                    "capabilities": capability_report({
+                        "supports_multi_reference": False,
+                        "supports_rgba": False,
+                    }),
+                }
+
+            def cancel(self, job_id):
+                pass
+
+        root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
+        repository = Repository(root)
+        for index in range(2):
+            source = repository.work_dir / f"ref-{index}.png"
+            Image.new("RGB", (2, 2), (index, index, index)).save(source)
+            repository.add_upload("session-1", source.name, source)
+        queue = RenderQueue(repository, UnsupportedAdapter(), start_worker=False)
+        with self.assertRaisesRegex(ValueError, "at most 1"):
+            queue.enqueue({"session": "session-1", "prompt": "test"})
+
+        repository.delete_input("session-1", ident=repository.inputs("session-1")[1]["id"])
+        with self.assertRaisesRegex(ValueError, "RGBA output is unsupported"):
+            queue.enqueue({"session": "session-1", "prompt": "transparent", "preset": "transparent"})
 
     def test_mask_composite_resizes_and_preserves_hard_zero_pixels(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex

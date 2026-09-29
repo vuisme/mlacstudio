@@ -39,6 +39,9 @@ PRESETS = {"none", "transparent", "subject-extraction"}
 
 def capability_report(raw: dict[str, Any] | None = None) -> dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
+    nested = data.get("capabilities")
+    if isinstance(nested, dict):
+        data = {**data, **nested}
     features_value = data.get("features") or data.get("supported_features") or []
     if isinstance(features_value, dict):
         features = {str(key).lower() for key, value in features_value.items() if value}
@@ -609,6 +612,14 @@ class SdServerSupervisor:
             self._ensure_server()
             if job.get("cancel_requested"):
                 raise InterruptedError("render cancelled")
+            reference_count = len(job.get("references") or ([job["input"]] if job.get("input") else []))
+            if reference_count > int(self.capabilities.get("max_references") or 1):
+                raise ValueError(
+                    f"sd-server supports at most {self.capabilities.get('max_references') or 1} reference image(s)"
+                )
+            preset = job.get("settings", {}).get("preset", "none")
+            if preset != "none" and self.capabilities.get("rgba_reported") and not self.capabilities.get("rgba"):
+                raise ValueError("sd-server reports that RGBA output is unsupported")
             job["argv"] = self.build_server_argv(self.port or 0)
             on_progress({"stage": "load", "step": 0, "total": job["settings"]["steps"]})
             submitted = self.request_json("POST", self._url("/sdcpp/v1/img_gen"), self.build_request(job), 30)

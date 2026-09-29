@@ -156,8 +156,9 @@ function update() {
   const alphaPreset = $("preset").value !== "none";
   $("rgbaWarning").hidden = !alphaPreset || ui.capabilities.rgba;
   $("rgbaWarning").textContent = ui.capabilities.rgba_reported
-    ? "The active backend reports no RGBA output support. This preset can request transparency, but the saved PNG may be opaque."
+    ? "The active backend reports no RGBA output support, so this preset cannot be rendered."
     : "RGBA output support has not been reported by the backend. This preset can request transparency, but alpha is not guaranteed.";
+  $("generate").disabled = alphaPreset && ui.capabilities.rgba_reported && !ui.capabilities.rgba;
 
   const { w, h, source } = plannedSize();
   $("ratioSrc").textContent = ui.ratio ? "chosen" : `auto · ${source}`;
@@ -306,8 +307,8 @@ function renderRefs() {
       el("small", { text: `${input.width}x${input.height}${input.has_alpha ? " · RGBA" : ""}` })),
     roleSelect,
     el("span", { class: "ref-actions" },
-      el("button", { type: "button", text: "^", title: "Move up", disabled: index === 0, onclick: () => moveReference(index, -1) }),
-      el("button", { type: "button", text: "v", title: "Move down", disabled: index === ui.inputs.length - 1, onclick: () => moveReference(index, 1) }),
+      el("button", { type: "button", text: "^", title: "Move up", disabled: index === 0 || ui.inputs[index - 1]?.role === "base", onclick: () => moveReference(index, -1) }),
+      el("button", { type: "button", text: "v", title: "Move down", disabled: input.role === "base" || index === ui.inputs.length - 1, onclick: () => moveReference(index, 1) }),
       el("button", {
         type: "button", text: "x", title: `Remove ${input.original_name}`,
         onclick: async () => {

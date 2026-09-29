@@ -382,6 +382,9 @@ class Repository:
                 position = int(old_base["position"])
                 old_paths.append(str(old_base["relative_path"]))
                 conn.execute("DELETE FROM inputs WHERE id = ?", (old_base["id"],))
+            elif final_role == "base" and old_base:
+                conn.execute("UPDATE inputs SET position = position + 1 WHERE session_name = ?", (session,))
+                position = 0
             else:
                 position = max((int(row["position"]) for row in rows), default=-1) + 1
 
@@ -435,6 +438,11 @@ class Repository:
             ]
             if len(ordered_ids) != len(existing) or set(ordered_ids) != set(existing):
                 raise ValueError("ordered_ids must contain every session reference exactly once")
+            base = conn.execute(
+                "SELECT id FROM inputs WHERE session_name = ? AND role = 'base'", (session,)
+            ).fetchone()
+            if base and ordered_ids and ordered_ids[0] != str(base["id"]):
+                raise ValueError("the base reference must remain first")
             for position, ident in enumerate(ordered_ids):
                 conn.execute(
                     "UPDATE inputs SET position = ? WHERE id = ? AND session_name = ?",
@@ -455,7 +463,15 @@ class Repository:
             if not row:
                 raise ValueError("reference not found")
             if role == "base" and row["role"] != "base":
+                old_base = conn.execute(
+                    "SELECT id, position FROM inputs WHERE session_name = ? AND role = 'base'", (session,)
+                ).fetchone()
                 conn.execute("UPDATE inputs SET role = 'reference' WHERE session_name = ? AND role = 'base'", (session,))
+                if old_base:
+                    conn.execute(
+                        "UPDATE inputs SET position = ? WHERE id = ?", (row["position"], old_base["id"])
+                    )
+                conn.execute("UPDATE inputs SET position = 0 WHERE id = ?", (ident,))
                 mask_row = conn.execute(
                     "SELECT relative_path FROM masks WHERE session_name = ?", (session,)
                 ).fetchone()
@@ -709,8 +725,8 @@ def image_dimensions(path: Path) -> tuple[int, int]:
 def image_metadata(path: Path) -> tuple[int, int, bool]:
     width, height = image_dimensions(path)
     with Image.open(path) as image:
-        image.load()
         has_alpha = "A" in image.getbands() or "transparency" in image.info
+        image.verify()
     return width, height, has_alpha
 
 
