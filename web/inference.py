@@ -35,6 +35,30 @@ PATH_KEYS = ("sd_cli", "sd_server", "transformer", "text_encoder", "mmproj", "va
 MODEL_STATES = {"unloaded", "loading", "ready", "rendering", "idle", "error"}
 STEP_RE = re.compile(r"(?:step\s*)?(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 PRESETS = {"none", "transparent", "subject-extraction"}
+RGBA_PREFIX = "This is an RGBA image with transparency."
+RGBA_SUFFIX = "The image has alpha channel and the background is transparent."
+
+
+def compose_preset_prompt(prompt: str, preset: str) -> str:
+    """Build the effective model prompt without mutating the user's saved prompt."""
+    raw = str(prompt or "").strip()
+    if preset == "none":
+        return raw
+    if raw.startswith(RGBA_PREFIX) and raw.endswith(RGBA_SUFFIX):
+        return raw
+    if preset == "transparent":
+        return f"{RGBA_PREFIX} {raw} {RGBA_SUFFIX}".strip()
+    if preset == "subject-extraction":
+        target = raw or "the main subject"
+        return (
+            f"{RGBA_PREFIX} Extract only {target} from the base image. "
+            "Preserve the exact identity, shape, proportions, pose, colors, materials, textures, "
+            "logos, text, accessories, and all visible fine details of the selected subject. "
+            "Remove the entire background and every unrelated person or object. "
+            "Do not redraw, restyle, beautify, crop, distort, add, remove, or replace any part of the subject. "
+            f"Keep complete fine edges and natural alpha boundaries. {RGBA_SUFFIX}"
+        )
+    raise ValueError("invalid preset")
 
 
 def capability_report(raw: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -810,18 +834,8 @@ class RenderQueue:
             if mask_path:
                 job_mask = output.parent / "mask.png"
                 shutil.copy2(mask_path, job_mask)
-        resolved_prompt = settings["prompt"].strip()
-        if settings["preset"] == "transparent":
-            resolved_prompt = (
-                f"This is an RGBA image with transparency. {resolved_prompt} "
-                "The image has alpha channel and the background is transparent."
-            )
-        elif settings["preset"] == "subject-extraction":
-            resolved_prompt = (
-                "This is an RGBA image with transparency. Extract the main subject from the base image. "
-                f"{resolved_prompt} Preserve identity, detail, and color. "
-                "The image has alpha channel and the background is transparent."
-            )
+        resolved_prompt = compose_preset_prompt(settings["prompt"], settings["preset"])
+
         for index, item in enumerate(input_items, start=1):
             resolved_prompt = re.sub(
                 rf"@{re.escape(item['name'])}(?![A-Za-z0-9._-])", f"<image{index}>", resolved_prompt

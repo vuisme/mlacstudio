@@ -22,6 +22,7 @@ from inference import (
     StableDiffusionAdapter,
     StudioConfig,
     composite_masked_output,
+    compose_preset_prompt,
     prepare_inference_mask,
     _native_process_options,
 )
@@ -107,6 +108,28 @@ class RecordingFallback:
 
     def cancel(self, job_id):
         pass
+
+
+class PresetPromptTests(unittest.TestCase):
+    def test_transparent_wraps_raw_prompt_once(self) -> None:
+        raw = "cute girl chibi sticker"
+        effective = compose_preset_prompt(raw, "transparent")
+        self.assertEqual(raw, "cute girl chibi sticker")
+        self.assertTrue(effective.startswith("This is an RGBA image with transparency."))
+        self.assertIn(raw, effective)
+        self.assertTrue(effective.endswith("The image has alpha channel and the background is transparent."))
+        self.assertEqual(compose_preset_prompt(effective, "transparent"), effective)
+
+    def test_subject_extraction_treats_raw_prompt_as_target_and_preserves_details(self) -> None:
+        effective = compose_preset_prompt("the woman in the red dress", "subject-extraction")
+        self.assertIn("Extract only the woman in the red dress from the base image.", effective)
+        self.assertIn("exact identity", effective)
+        self.assertIn("logos, text", effective)
+        self.assertIn("Do not redraw, restyle", effective)
+        self.assertEqual(effective.count("This is an RGBA image with transparency."), 1)
+
+    def test_none_keeps_raw_prompt(self) -> None:
+        self.assertEqual(compose_preset_prompt("  plain prompt  ", "none"), "plain prompt")
 
 
 class AdapterTests(unittest.TestCase):
