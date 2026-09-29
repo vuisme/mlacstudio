@@ -810,7 +810,18 @@ class RenderQueue:
             if mask_path:
                 job_mask = output.parent / "mask.png"
                 shutil.copy2(mask_path, job_mask)
-        resolved_prompt = settings["prompt"]
+        resolved_prompt = settings["prompt"].strip()
+        if settings["preset"] == "transparent":
+            resolved_prompt = (
+                f"This is an RGBA image with transparency. {resolved_prompt} "
+                "The image has alpha channel and the background is transparent."
+            )
+        elif settings["preset"] == "subject-extraction":
+            resolved_prompt = (
+                "This is an RGBA image with transparency. Extract the main subject from the base image. "
+                f"{resolved_prompt} Preserve identity, detail, and color. "
+                "The image has alpha channel and the background is transparent."
+            )
         for index, item in enumerate(input_items, start=1):
             resolved_prompt = re.sub(
                 rf"@{re.escape(item['name'])}(?![A-Za-z0-9._-])", f"<image{index}>", resolved_prompt

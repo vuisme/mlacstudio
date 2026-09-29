@@ -15,8 +15,8 @@ const ROLE_LABELS = {
   identity: "Identity", background: "Background", reference: "Reference",
 };
 const PRESET_PROMPTS = {
-  transparent: "This is an RGBA image with transparency. Create the requested subject with clean alpha edges and no backdrop. The image has alpha channel and the background is transparent.",
-  "subject-extraction": "This is an RGBA image with transparency. Extract the main subject from the base image with clean alpha edges. Preserve identity, detail, and color. The image has alpha channel and the background is transparent.",
+  transparent: (prompt) => `This is an RGBA image with transparency. ${prompt} The image has alpha channel and the background is transparent.`,
+  "subject-extraction": (prompt) => `This is an RGBA image with transparency. Extract the main subject from the base image. ${prompt} Preserve identity, detail, and color. The image has alpha channel and the background is transparent.`,
 };
 let csrfToken = "";
 
@@ -188,8 +188,9 @@ function renderRatios() {
 function renderCommand() {
   const s = settings();
   const quote = (t) => (/^[\w./:=@+,-]+$/.test(t) ? t : `"${t.replace(/"/g, '\\"')}"`);
-  const tagged = resolveMentions(s.prompt);
-  const p = tagged.length > 40 ? `${tagged.slice(0, 40)}…` : tagged;
+  const rawPrompt = PRESET_PROMPTS[s.preset] ? PRESET_PROMPTS[s.preset](s.prompt) : s.prompt;
+  const tagged = resolveMentions(rawPrompt);
+  const p = tagged.length > 90 ? `${tagged.slice(0, 90)}…` : tagged;
   const parts = [`<span class="k">sd-cli</span> --prompt ${escapeHtml(quote(p || "…"))}`];
   for (const input of ui.inputs) parts.push(`--ref-image ${escapeHtml(input.name)}`);
   if (ui.maskInfo) parts.push("--mask mask.png");
@@ -1076,10 +1077,6 @@ function openModels() {
 }
 
 function applyPreset() {
-  const preset = $("preset").value;
-  if (PRESET_PROMPTS[preset] && !$("prompt").value.trim()) {
-    $("prompt").value = PRESET_PROMPTS[preset];
-  }
   update();
   saveSoon();
 }
