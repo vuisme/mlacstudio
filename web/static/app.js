@@ -15,8 +15,8 @@ const ROLE_LABELS = {
   identity: "Identity", background: "Background", reference: "Reference",
 };
 const PRESET_PROMPTS = {
-  transparent: "Create an image with a transparent background. Keep the subject opaque with clean alpha edges and no backdrop.",
-  "subject-extraction": "Extract the main subject from the base image onto a transparent background with clean alpha edges. Preserve identity, detail, and color.",
+  transparent: "This is an RGBA image with transparency. Create the requested subject with clean alpha edges and no backdrop. The image has alpha channel and the background is transparent.",
+  "subject-extraction": "This is an RGBA image with transparency. Extract the main subject from the base image with clean alpha edges. Preserve identity, detail, and color. The image has alpha channel and the background is transparent.",
 };
 let csrfToken = "";
 

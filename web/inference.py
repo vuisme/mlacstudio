@@ -961,6 +961,13 @@ class RenderQueue:
                     Path(job["output"]), Path(job["input"]), Path(job["mask"]), int(job.get("mask_feather") or 0)
                 )
             width, height, has_alpha = image_metadata(Path(job["output"]))
+            preset = str(job["settings"].get("preset") or "none")
+            if preset in {"transparent", "subject-extraction"} and not has_alpha:
+                raise RuntimeError(
+                    "The active model/runtime returned an opaque image for the transparency preset. "
+                    "Use the official Qwen RGBA prompt format or switch to a Qwen-Image-2.1 runtime/profile "
+                    "that preserves a non-opaque PNG alpha channel."
+                )
             elapsed = time.monotonic() - started
             params = {
                 "name": f"take-{job['id'][:8]}.png", "prompt": job["settings"]["prompt"],

@@ -725,8 +725,15 @@ def image_dimensions(path: Path) -> tuple[int, int]:
 def image_metadata(path: Path) -> tuple[int, int, bool]:
     width, height = image_dimensions(path)
     with Image.open(path) as image:
-        has_alpha = "A" in image.getbands() or "transparency" in image.info
-        image.verify()
+        has_alpha = False
+        if "A" in image.getbands():
+            alpha_min, _alpha_max = image.getchannel("A").getextrema()
+            # Qwen/sd.cpp may encode an RGBA PNG whose alpha stays 251–255;
+            # that is visually opaque and must not count as transparent output.
+            has_alpha = int(alpha_min) < 250
+        elif "transparency" in image.info:
+            has_alpha = True
+        image.load()
     return width, height, has_alpha
 
 

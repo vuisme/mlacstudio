@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "web"))
 ROOT = Path(__file__).resolve().parents[1]
 
-from storage import MAX_REFERENCES, Repository, resolve_under, safe_name
+from storage import MAX_REFERENCES, Repository, image_metadata, resolve_under, safe_name
 
 
 class PathSafetyTests(unittest.TestCase):
@@ -28,6 +28,21 @@ class PathSafetyTests(unittest.TestCase):
 
     def test_safe_name_drops_directories(self) -> None:
         self.assertEqual(safe_name("../../bad name.png"), "bad-name.png")
+
+    def test_image_metadata_requires_nontrivial_alpha(self) -> None:
+        root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
+        root.mkdir(parents=True)
+        opaque = root / "opaque.png"
+        transparent = root / "transparent.png"
+        Image.new("RGBA", (2, 2), (255, 255, 255, 252)).save(opaque)
+        Image.new("RGBA", (2, 2), (255, 255, 255, 255)).save(transparent)
+        with Image.open(transparent) as image:
+            alpha = image.getchannel("A")
+            alpha.putpixel((0, 0), 0)
+            image.putalpha(alpha)
+            image.save(transparent)
+        self.assertEqual(image_metadata(opaque), (2, 2, False))
+        self.assertEqual(image_metadata(transparent), (2, 2, True))
 
     def test_existing_jobs_table_gets_mask_path_migration(self) -> None:
         root = ROOT / "tests" / "runtime" / uuid.uuid4().hex
